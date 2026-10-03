@@ -18,7 +18,7 @@ Daily Nourish is a mobile app that creates a personalized nutritional planner ba
 ## Technologies
 | Layer | Tech | Notes |
 |---|---|---|
-| Mobile app | **Swift** (built with **Xcode**) | Native iOS only |
+| Mobile app | **React Native** (via **Expo**) | Implementing iOS only, but can support cross-platform if added in future |
 | Backend/Database | **Supabase** | Database, auth, and storage (User profiles, saved meal plans, and user preferences) |
 | Meal plan/Recipe data | **FatSecret** | Generates meal plans and recipes/nutrition data |
 | Auth | **Supabase** | Email/password |
@@ -27,26 +27,33 @@ Daily Nourish is a mobile app that creates a personalized nutritional planner ba
 ## Setup
 Instructions for getting the app running on your own computer:
 
-1. Make sure you have **Xcode** installed (from the Mac App Store) — this is required to build and run the app, and only works on a Mac.
+1. Make sure you have **Node.js** installed on your computer.
 2. Clone the repository and go into the project folder
    ```
    git clone [repo-url]
-   cd Daily_Nourish
+   cd [repo-name]
    ```
-3. Open the project in Xcode
+3. Install the project's dependencies
    ```
-   open Daily_Nourish.xcodeproj
+   npm install
    ```
+4. Start the app
+   ```
+   npx expo start
+   ```
+5. Scan the QR code that appears with the **Expo Go** app on your phone (or press `i` to open an iOS simulator, if you have Xcode installed) to see the app running.
+6. A few keys/settings will need to be added to a `.env` file before things work fully (Supabase and FatSecret keys). These will be shared with the team separately rather than committed to GitHub.
 
 ## Structure
 A quick look at how the project is organized:
 
 ```
-/DailyNourish
-  /Views         # the actual screens the user sees (login, meal plan, profile, etc.)
-  /Models        # the shapes of our data (user, meal plan, recipe, etc.)
-  /Services      # code that talks to Supabase and the FatSecret API
-  /Resources     # images, colors, and other assets used in the app
+/src
+  /screens       # the actual app screens the user sees (login, meal plan, profile, etc.)
+  /components    # smaller reusable pieces used across screens
+  /navigation    # controls how users move between screens
+  /services      # code that talks to Supabase and the FatSecret API
+  /constants     # shared values used across the app
 
 /docs            # research notes, planning docs, and other write-ups
 ```
