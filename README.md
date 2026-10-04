@@ -42,21 +42,30 @@ Instructions for getting the app running on your own computer:
    npx expo start
    ```
 5. Scan the QR code that appears with the **Expo Go** app on your phone (or press `i` to open an iOS simulator, if you have Xcode installed) to see the app running.
-6. A few keys/settings will need to be added to a `.env` file before things work fully (Supabase and FatSecret keys). These will be shared with the team separately rather than committed to GitHub.
+6. Copy `.env.example` to a new file called `.env`, then fill in the real values (Supabase and FatSecret keys). These keys will be shared with the team separately.
+   ```
+   cp .env.example .env
+   ```
 
 ## Structure
 A quick look at how the project is organized:
 
 ```
 /src
-  /screens       # the actual app screens the user sees (login, meal plan, profile, etc.)
+  /app           # the app's screens — see note below
   /components    # smaller reusable pieces used across screens
-  /navigation    # controls how users move between screens
-  /services      # code that talks to Supabase and the FatSecret API
   /constants     # shared values used across the app
+  /hooks         # custom reusable logic (not UI)
+  global.css     # shared app-wide styling
 
 /docs            # research notes, planning docs, and other write-ups
 ```
+**About `/app`:** every file inside this folder automatically becomes a screen in the app — so instead of a separate "screens" folder and a separate file wiring up navigation, the two are combined here. For example:
+- `index.tsx` → the Home screen
+- `explore.tsx` → a second screen/tab
+- `_layout.tsx` → controls the tab bar and overall navigation
+
+To add a new screen (like Food Search), add a new file here (e.g. `food-search.tsx`) and connect it in `_layout.tsx`.
 
 ## Branching Guidelines
 To keep things organized while multiple people are working on the app at once:
