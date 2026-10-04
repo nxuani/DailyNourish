@@ -37,15 +37,21 @@ Instructions for getting the app running on your own computer:
    ```
    npm install
    ```
-4. Start the app
-   ```
-   npx expo start
-   ```
-5. Scan the QR code that appears with the **Expo Go** app on your phone (or press `i` to open an iOS simulator, if you have Xcode installed) to see the app running.
-6. Copy `.env.example` to a new file called `.env`, then fill in the real values (Supabase and FatSecret keys). These keys will be shared with the team separately.
+4. Copy `.env.example` to a new file called `.env`, then fill in the real values (Supabase and FatSecret keys). These keys will be shared with the team separately.
    ```
    cp .env.example .env
    ```
+5. Create a free account at [expo.dev](https://expo.dev) if you don't already have one (use your own personal email, not a shared one).
+6. Sign in on your computer:
+   ```
+   npx expo login
+   ```
+7. Download the **Expo Go** app on your phone (App Store), open it, and sign in with the **same account** you just created.
+8. Start the app
+   ```
+   npx expo start
+   ```
+9. Scan the QR code that appears with the **Expo Go** app on your phone (or press `i` to open an iOS simulator, if you have Xcode installed) to see the app running.
 
 ## Structure
 A quick look at how the project is organized:
