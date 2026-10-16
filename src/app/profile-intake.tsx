@@ -1,452 +1,759 @@
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { useTheme } from '@/hooks/use-theme';
 import { supabase } from '@/lib/supabase';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
     Alert,
+    KeyboardAvoidingView,
+    Platform,
     Pressable,
     SafeAreaView,
     ScrollView,
     StyleSheet,
+    Text,
     TextInput,
-    View,
+    View
 } from 'react-native';
+
+const COLORS = 
+{
+    background: '#f7f5ed',
+    green: '#244d3f',
+    text: '#244B3B',
+    secondary: '#718071',
+    white: '#fffdf7',
+    selected: '#e9ede3',
+    progressEmpty: '#ffffff',
+    border: '#e5e5da',
+};
+
+const TOTAL_STEPS = 7;
+
+const GENDERS = [
+    'Female',
+    'Male',
+    'Non-binary',
+    'Prefer not to answer',
+];
+
+const ACTIVITY_LEVELS = [
+    'Very active',
+    'Moderately active',
+    'Lightly active',
+    'Not active',
+];
+
+const MONTHS = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+];
 
 //collects profile info and saves it to supabase
 export default function ProfileIntakeScreen()
 {
-    const theme = useTheme();
-
     //state variables hold values entered or selected in the form
-    const [age, setAge] = useState('');
+    const [step, setStep] = useState(0);
+    const initialPickerDate = new Date(1997, 8, 1);
+    const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
+
     const [gender, setGender] = useState('');
+    const [heightft, setHeightft] = useState('');
+    const [heightin, setHeightin] = useState('');
+    const [weight, setWeight] = useState('');
     const [activityLevel, setActivityLevel] = useState('');
     const [goal, setGoal] = useState('');
     const [allergies, setAllergies] = useState('');
-    const [error, setError] = useState('');
+    const [restrictions, setRestrictions] = useState('')
     const [saving, setSaving] = useState(false);
 
-    const genderOptions = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
+    const goBack = () => {
+        if(step > 0)
+        {
+            setStep((current) => current - 1);
+        }
+        else
+        {
+            router.back();
+        }
+    };
 
-    const activityOptions = [
-        'Very active',
-        'Moderately active',
-        'Lightly active',
-        'Not very active'
-    ];
+    const skipStep = () => {
+        if(step < TOTAL_STEPS - 1)
+        {
+            setStep((current) => current + 1);
+        }
+    };
 
-    //dont know if want to add more or have less
-    const goalOptions = [
-        'Weight loss',
-        'Muscle gain',
-        'Maintain weight',
-        'Heart health',
-        'Diabetes management',
-        'High blood pressure management',
-    ];
+    //validate answers before allowing user to continue
+    const validateCurrentStep = () => {
+        if(step === 0 && !dateOfBirth)
+        {
+            Alert.alert(
+                'Date of birth',
+                'Please scroll to select your birthday or choose Skip',
+            );
+            return false;
+        }
 
-    //validate the form and save the info to supabase
-    const handleSubmit = async () => {
-        setError('');
+        //validate height and weight on measurement screen
+        if(step === 2)
+        {
+            const ft = Number(heightft);
+            const inches = Number(heightin);
+            const lbs = Number(weight);
 
-        //prevent user from submitting the form multiple times
+            if(!heightft.trim() || !heightin.trim() || !weight.trim())
+            {
+                Alert.alert(
+                    'Height and weight',
+                    'Please complete all three fields or choose Skip'
+                );
+                return false;
+            }
+
+            if(!Number.isInteger(ft) || !Number.isInteger(inches) || ft < 1 || ft > 8 || inches < 0 || inches > 11)
+            {
+                Alert.alert(
+                    'Invalid height',
+                    'Enter your height in ft and in'
+                );
+                return false;
+            }
+
+            if(!Number.isFinite(lbs) || lbs < 22 || lbs > 1100)
+            {
+                Alert.alert(
+                    'Invalid weight',
+                    'Enter a weight between 22 and 1100 pounds'
+                );
+                return false;
+            }
+        }
+
+        //validate activity level
+        if(step === 3 && !activityLevel)
+        {
+            Alert.alert(
+                'Activity level',
+                'Please select an activity level or choose Skip'
+            );
+            return false;
+        }
+
+        //validate goal
+        if(step === 4 && !goal.trim())
+        {
+            Alert.alert(
+                'Goal',
+                'Please enter what your goal is or choose Skip'
+            );
+            return false;
+        }
+        return true;
+    };
+
+    //advance to next screen or save completed intake form
+    const continueStep = async () => {
+        //don't proceed when current answers are invalid
+        if(!validateCurrentStep())
+        {
+            return;
+        }
+
+        //move to next screen unless this is the final screen
+        if(step < TOTAL_STEPS - 1)
+        {
+            setStep((current) => current + 1);
+            return;
+        }
+
+        //final screen is complete and save profile
+        await saveProfile();
+    };
+
+    //save profile details and selected health goal to supabase
+    const saveProfile = async () => {
+        //avoid submitting form more than once at a time
         if(saving)
         {
             return;
         }
 
-        //validate age
-        if(!age.trim())
-        {
-            setError('Please enter your age');
-            return;
-        }
-
-        const ageNumber = Number(age);
-        if(!Number.isInteger(ageNumber) || ageNumber < 13 || ageNumber > 120)
-        {
-            setError('Please enter a valid age between 13 and 120');
-            return;
-        }
-
-        //validate required selections
-        if(!gender)
-        {
-            setError('Please select your gender');
-            return;
-        }
-
-        if(!activityLevel)
-        {
-            setError('Please select your activity level');
-            return;
-        }
-
-        if(!goal)
-        {
-            setError('Please select a health goal');
-            return;
-        }
-
-        setSaving(true);
-
-        //get currently authenticated supabase user and their UUID
-        //is stored in users.auth_is
-        try
-        {
-            const
-            {
-                data: authData,
+        try {
+            //find the currently signed in supabase user
+            const {
+                data: { user },
                 error: authError,
             } = await supabase.auth.getUser();
 
-            if(authError) throw authError;
-            const authUser = authData.user;
-
-            //a profile must be associated with an authenticated account
-            if(!authUser)
+            //profile cannot be saved without an authenticated user
+            if(authError || !user)
             {
-                setError('Please sign in before saving your profile');
+                Alert.alert(
+                    'Sign in required',
+                    'Please sign in before saving your profile'
+                );
                 return;
             }
 
-            //database stores date_of_birth rather than age
-            //estimates birth date from age entered so approximate
-            //because we don't ask for birthday ?
-            const birthDate = new Date();
-            birthDate.setFullYear(
-                birthDate.getFullYear() - ageNumber,
-            );
+            //format the selected birthday as YYYY-MM-DD for supabase
+            const formattedDateOfBirth = dateOfBirth 
+                ? [
+                    dateOfBirth.getFullYear(),
+                    String(dateOfBirth.getMonth() + 1).padStart(2, '0'),
+                    String(dateOfBirth.getDate()).padStart(2, '0'),
+                  ].join('-')
+                : null;
 
-            const dateOfBirth = [
-                birthDate.getFullYear(),
-                String(birthDate.getMonth() + 1).padStart(2, '0'),
-                String(birthDate.getDate()).padStart(2, '0'),
-            ].join('-');
 
-            //use account's name if available otherwise use part
-            //of the email address before @ symbol
-            const name =
-                authUser.user_metadata?.full_name ??
-                authUser.user_metadata?.name ??
-                authUser.email?.split('@')[0] ??
-                '';
-            
-            //check whether this authenticated user already has profile
-            const 
+            //start with empty measurement values in case user 
+            //has skipped the height and weight screen
+            let heightCm: number | null = null;
+            let weightKg: number | null = null;
+
+            //convert ft and in into cm
+            if(heightft.trim() && heightin.trim())
             {
-                data: existingProfile,
-                error: lookUpError,
-            } = await supabase
-                .from('users')
-                .select('user_id')
-                .eq('auth_id', authUser.id)
-                .maybeSingle();
+                const totalInches = Number(heightft) * 12 + Number(heightin);
+                heightCm = totalInches * 2.54;
+            }
 
-            if(lookUpError) throw lookUpError;
+            //convert lbs into kgs
+            if(weight.trim())
+            {
+                weightKg = Number(weight) * 0.45359237;
+            }
 
-            //prepare profile fields using your database column names
-            const now = new Date().toISOString();
+            //prepare the profile info for public.users
             const profileData = {
-                auth_id: authUser.id,
-                name,
-                email: authUser.email ?? '',
-                date_of_birth: dateOfBirth,
-                gender,
-                activity_level: activityLevel,
-                updated_at: now,
+                auth_id: user.id,
+
+                //use account name when available otherwise use part of email before @
+                name:
+                    user.user_metadata?.name ??
+                    user.email?.split('@')[0] ??
+                    'User',
+                email: user.email ?? '',
+
+                //store actual birthday
+                date_of_birth: formattedDateOfBirth,
+
+                //save empty optional ans as null
+                gender: gender || null,
+                height: heightCm,
+                weight: weightKg,
+                activity_level: activityLevel || null,
+                restrictions: restrictions.trim() || null,
             };
 
-            //need the integer user_id to associate a goal with the profile
-            let profileId: number;
+            //check whether the user already has a profile
+            //auth_id connects public.users to auth.users
+            const {
+                data: existingProfile,
+                error: lookupError,
+            } = await supabase
+              .from('users')
+              .select('user_id')
+              .eq('auth_id', user.id)
+              .maybeSingle();
+            
+            if(lookupError)
+            {
+                throw lookupError;
+            }
+
+            //update existing profile instead of creating a duplicate
             if(existingProfile)
             {
-                //update existing profile than creating a duplicate
-                const
-                {
-                    data: updatedProfile,
-                    error: updateError,
-                } = await supabase
-                    .from('users')
-                    .update(profileData)
-                    .eq('user_id', existingProfile.user_id)
-                    .select('user_id')
-                    .single();
+                const { error: updateError } = await supabase
+                  .from('users')
+                  .update(profileData)
+                  .eq('auth_id', user.id);
                 
-                if(updateError) throw updateError;
-                profileId = updatedProfile.user_id;
+                if(updateError)
+                {
+                    throw updateError
+                }
+                else
+                {
+                    //create profile when user doesn't have one yet
+                    const { error: insertError } = await supabase
+                      .from('users')
+                      .insert(profileData);
+                    
+                    if(insertError)
+                    {
+                        throw insertError;
+                    }
+                }
             }
-            else
+            //save selected goal only when user chose one
+            if(goal)
             {
-                //create new profile linked to authenticated account
-                const
-                {
-                    data: newProfile,
-                    error: insertError,
+                //retrieve internal user_id from public.users
+                //goals.user_id references this integer, not auth UUID
+                const {
+                    data: savedProfile,
+                    error: profileError,
                 } = await supabase
-                    .from('users')
-                    .insert({
-                        ...profileData,
-                        created_at: now,
-                    })
-                    .select('user_id')
-                    .single();
-                
-                if(insertError) throw insertError;
-                profileId = newProfile.user_id;
+                  .from('users')
+                  .select('user_id')
+                  .eq('auth_id', user.id)
+                  .single();
+                    
+                if(profileError)
+                {
+                    throw profileError;
+                }
+
+                //look for an existing active goal of the same type
+                //prevents inserting same active goal repeatedly
+                const {
+                    data: existingGoal,
+                    error: goalLookupError,
+                } = await supabase
+                  .from('goals')
+                  .select('goal_id')
+                  .eq('user_id', savedProfile.user_id)
+                  .eq('goal_type', goal)
+                  .eq('is_active', true)
+                  .maybeSingle();
+                    
+                if(goalLookupError)
+                {
+                    throw goalLookupError;
+                }
+
+                //only create a new goal when one does not already exist
+                if(!existingGoal)
+                {
+                    const today = new Date()
+                      .toISOString()
+                      .split('T')[0];
+                        
+                    const { error: goalError } = await supabase
+                      .from('goals')
+                      .insert({
+                        //foreign kett to public.users.user_id
+                        user_id: savedProfile.user_id,
+                        goal_type: goal,
+                        description: goal,
+                        //target_calories: null,
+                        //target_protein: null,
+                        start_date: today,
+                        //target_date omitted for right now
+                        is_active: true,
+                      });
+                        
+                    if(goalError)
+                    {
+                        throw goalError;
+                    }
+                }
             }
 
-            //save selected health goal in separate goals table
-            //this creates new active goal each time this form is submitted
-            const
-            {
-                error: goalError,
-            } = await supabase
-                .from('goals')
-                .insert({
-                    user_id: profileId,
-                    goal_type: goal,
-                    is_active: true,
-                    start_date: new Date().toISOString().slice(0, 10),
-                });
-            
-            if(goalError) throw goalError;
+            //allergies ans currently collected in state but not saved here
+            //saving it requires mapping the entered allergy names to allergies
+            //records and inserting the matching IDs into user_allergies
 
-            //for now allergies are collected but not saved, later match
-            //them against public.allergies and create records in public.user_allergies
-            //inform user that database operations succeeded
             Alert.alert(
-                'Profile Saved',
-                'Your profile and health goal have been saved',
+                'Profile saved',
+                'Your Daily Nourish profile is ready',
                 [
                     {
                         text: 'Continue',
                         onPress: () => router.replace('/'),
                     },
-                ],
+                ]
             );
-        } catch(err) {
+        } catch(error) {
+            //log underlying error to help with debugging
+            console.error('Error saving profile:', error);
 
-            //log technical details for debugging
-            console.error('Profile save failed:', err);
-
-            //display error instead of falsely reporting success
-            setError(
-                err instanceof Error
-                    ? err.message
-                    : 'Could not save your profile. Please try again',
+            //show readable error message to user
+            Alert.alert(
+                'Unable to save profile',
+                error instanceof Error
+                    ? error.message
+                    : 'Something went wrong. Please try again'
             );
         } finally {
-
-            //re-enable button whether the save succeeds or fails
+            //reenable the button even if saving failed
             setSaving(false);
         }
     };
 
-    return (
-        <ThemedView style={styles.container}>
-            <SafeAreaView style={styles.safeArea}>
-                <ScrollView
-                    contentContainerStyle={styles.scrollContent}
-                    keyboardShouldPersistTaps="handled"
-                >
-                    {/* screen heading and explanation */}
-                    <View style={styles.header}>
-                        <ThemedText type="title" style={styles.headerTitle}>
-                            Your Profile
-                        </ThemedText>
-
-                        <ThemedText style={styles.headerDescription}>
-                            Tell us about yourself so we can personalize
-                            your nutrition recommendations
-                        </ThemedText>
-                    </View>
-
-                    {/* age input */}
-                    <View style={styles.section}>
-                        <ThemedText type="smallBold" style={styles.label}>
-                            Age
-                        </ThemedText>
-
-                        <TextInput
-                            value={age}
-                            onChangeText={setAge}
-                            placeholder="Enter your age"
-                            placeholderTextColor={theme.text}
-                            keyboardType="number-pad"
-                            style={[
-                                styles.textInput,
-                                {
-                                    color: theme.text,
-                                    borderColor: theme.backgroundElement,
-                                    backgroundColor: theme.backgroundElement,
-                                },
-                            ]}
-                        />
-                    </View>
-
-                    {/* gender choices */}
-                    <View style={styles.section}>
-                        <ThemedText type="smallBold" style={styles.label}>
-                            Gender
-                        </ThemedText>
-
-                        <View style={styles.optionsContainer}>
-                            {genderOptions.map((option) => (
-                                <OptionButton
-                                    key={option}
-                                    label={option}
-                                    selected={gender === option}
-                                    onPress={() => setGender(option)}
-                                    theme={theme}
-                                />
-                            ))}
-                        </View>
-                    </View>
-
-                    {/* activity level choices */}
-                    <View style={styles.section}>
-                        <ThemedText type="smallBold" style={styles.label}>
-                            Activity Level
-                        </ThemedText>
-
-                        <View style={styles.optionsContainer}>
-                            {activityOptions.map((option) => (
-                                <OptionButton
-                                    key={option}
-                                    label={option}
-                                    selected={activityLevel === option}
-                                    onPress={() => setActivityLevel(option)}
-                                    theme={theme}
-                                />
-                            ))}
-                        </View>
-                    </View>
-
-                    {/* health goal choices */}
-                    <View style={styles.section}>
-                        <ThemedText type="smallBold" style={styles.label}>
-                            Health Goal
-                        </ThemedText>
-
-                        <View style={styles.optionsContainer}>
-                            {goalOptions.map((option) => (
-                                <OptionButton
-                                    key={option}
-                                    label={option}
-                                    selected={goal === option}
-                                    onPress={() => setGoal(option)}
-                                    theme={theme}
-                                />
-                            ))}
-                        </View>
-                    </View>
-
-                    {/* allergy input -> saving these requires additional table logical */}
-                    <View style={styles.section}>
-                        <ThemedText type="smallBold" style={styles.label}>
-                            Food Allergies
-                        </ThemedText>
-
-                        <ThemedText type="small" style={styles.helperText}>
-                            Enter any food allergies, separated by commas
-                        </ThemedText>
-
-                        <TextInput
-                            value={allergies}
-                            onChangeText={setAllergies}
-                            placeholder="Example: peanuts, shellfish"
-                            placeholderTextColor={theme.text}
-                            multiline
-                            style={[
-                                styles.textInput,
-                                styles.allergyInput,
-                                {
-                                    color: theme.text,
-                                    borderColor: theme.backgroundElement,
-                                    backgroundColor: theme.backgroundElement,
-                                },
-                            ]}
-                        />  
-                    </View>
-
-                    {/* show validation or database errors */}
-                    {error ? (
-                        <ThemedText style={styles.errorText}>
-                            {error}
-                        </ThemedText>
-                    ) : null}
-
-                    {/* submit the form and show a loading label while saving */}
-                    <Pressable
-                        disabled={saving}
-                        onPress={handleSubmit}
-                        style={({ pressed }) => [
-                            styles.continueButton,
-                            (pressed || saving) && styles.buttonPressed,
-                        ]}
-                    >
-                        <ThemedText style={styles.buttonText}>
-                            {saving ? 'Saving...' : 'Continue'}
-                        </ThemedText>
-                    </Pressable>
-                </ScrollView>
-            </SafeAreaView>
-        </ThemedView>
-    );
-}
-
-//props used by each reuable selection button
-type OptionButtonProps = {
-    label: string;
-    selected: boolean;
-    onPress: () => void;
-    theme: ReturnType<typeof useTheme>;
-};
-
-//reusable button for gender, activity level, and goal choices
-function OptionButton({
-    label,
-    selected,
-    onPress,
-    theme,
-}: OptionButtonProps) {
-    return (
+    //render a selectable option button
+    const renderOption = (
+        label: string,
+        selected: boolean,
+        onPress: () => void
+    ) => (
         <Pressable
-            accessibilityRole="radio"
-            accessibilityState={{ selected }}
+            key={label}
             onPress={onPress}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: selected }}
             style={[
-                styles.optionButton,
-                {
-                    borderColor: selected
-                    ? '#3c87f7'
-                    : theme.backgroundElement,
-                    backgroundColor: selected
-                    ? '#3c87f7'
-                    : theme.backgroundElement,
-                },
+                styles.option,
+                selected && styles.selectedOption,
             ]}
         >
-            <ThemedText
+            <Text
                 style={[
-                styles.optionText,
-                {
-                    color: selected ? '#ffffff' : theme.text,
-                },
-            ]}
+                    styles.optionText,
+                    selected && styles.selectedOptionText,
+                ]}
             >
                 {label}
-            </ThemedText>
+            </Text>
         </Pressable>
+    );
+
+    //screen 1: date of birth
+    const renderDateOfBirth = () => (
+        <>
+            <Text style={styles.dateOfBirthHeading}>
+                What is your date{'\n'}of birth?
+            </Text>
+
+            {/* white box containing scrolling date wheels */}
+            <View style={styles.dateCard}>
+                <DateTimePicker
+                    //show selected birthday or default date initially
+                    value={dateOfBirth ?? initialPickerDate}
+                    mode="date"
+                    display="spinner"
+
+                    //allow dates from jan 1, 1900 through today
+                    minimumDate={new Date(1900, 0, 1)}
+                    maximumDate={new Date()}
+
+                    //save date whenever the user changes the picker
+                    onChange={(event, selectedDate) => {
+                        if(event.type === 'set' && selectedDate)
+                        {
+                            setDateOfBirth(selectedDate);
+                        }
+                    }}
+                    style={styles.datePicker}
+                    themeVariant="light"
+                />
+            </View>
+        </>
+    );
+
+    //screen 2: gender
+    const renderGender = () => (
+        <>
+            <Text style={styles.genderHeading}>
+                What gender best{'\n'}describes you?
+            </Text>
+
+            <View style={styles.options}>
+                {GENDERS.map((item) =>
+                    renderOption(
+                        item,
+                        gender === item,
+                        () => setGender(gender === item ? '' : item)
+                    )
+                )}
+            </View>
+        </>
+    );
+
+    //screen 3: height and weight
+    const renderHeightWeight = () => (
+        <>
+            <Text style={styles.heightWeightHeading}>
+                What is your height{'\n'}and weight?
+            </Text>
+
+            <View style={styles.measurementRow}>
+                <View style={styles.measurementColumn}>
+                    <Text style={styles.fieldLabel}>Feet</Text>
+
+                    <TextInput
+                        style={styles.input}
+                        value={heightft}
+                        onChangeText={(value) =>
+                            setHeightft(value.replace(/[^0-9]/g, '').slice(0, 1))
+                        }
+                        placeholder="5 ft"
+                        placeholderTextColor={COLORS.secondary}
+                        keyboardType="number-pad"
+                        maxLength={1}
+                    />
+                </View>
+
+                <View style={styles.measurementColumn}>
+                    <Text style={styles.fieldLabel}>Inches</Text>
+
+                    <TextInput
+                        style={styles.input}
+                        value={heightin}
+                        onChangeText={(value) =>
+                            setHeightin(value.replace(/[^0-9]/g, '').slice(0, 2))
+                        }
+                        placeholder="10 in"
+                        placeholderTextColor={COLORS.secondary}
+                        keyboardType="number-pad"
+                        maxLength={2}
+                    />
+                </View>
+            </View>
+
+            {/* weight occupies the full width below height */}
+            <View style={styles.weightSection}>
+                <Text style={styles.fieldLabel}>Pounds</Text>
+
+                <TextInput
+                    style={styles.input}
+                    value={weight}
+                    onChangeText={(value) =>
+                        setWeight(value.replace(/[^0-9.]/g, ''))
+                    }
+                    placeholder="150 lb"
+                    placeholderTextColor={COLORS.secondary}
+                    keyboardType="decimal-pad"
+                />
+            </View>
+        </>
+    );
+
+    //screen 4: activity level
+    const renderActivity = () => (
+        <>
+            <Text style={styles.activityLevelHeading}>
+                What activity level{'\n'}best describes you?    
+            </Text>
+
+            <View style={styles.options}>
+                {ACTIVITY_LEVELS.map((item) =>
+                renderOption(
+                    item,
+                    activityLevel === item,
+                    () => setActivityLevel(activityLevel === item ? '' : item)
+                )
+            )}
+            </View>
+        </>
+    );
+
+    //screen 5: health goal
+    const renderGoal = () => (
+        <>
+            <Text style={styles.goalHeading}>
+                Can you describe{'\n'}what is your goal?
+            </Text>
+
+            <Text style={styles.helperText}>
+                Tell us what you want to achieve. You can type your own goal
+                or one of the examples provided
+            </Text>
+
+            {/* text field for user's personal goa */}
+            <View style={styles.textAreaCard}>
+                <TextInput
+                    style={styles.goalInput}
+                    value={goal}
+                    onChangeText={setGoal}
+                    placeholder="Examples: Weight loss, Muscle gain,
+                        Maintain weight, Heart health, Diabetes management,
+                        High blood pressure management"
+                    placeholderTextColor="#92988a"
+                    multiline
+                    textAlignVertical="top"
+                />
+            </View>
+        </>
+    );
+
+    //screen 6: food allergies
+    const renderAllergies = () => (
+        <>
+            <Text style={styles.allergyHeading}>
+                Do you have any{'\n'}food allergies?
+            </Text>
+
+            <Text style={styles.helperText}>
+                Enter any food allergies, separated by commas
+            </Text>
+
+            <TextInput
+                style={styles.allergiesTextArea}
+                value={allergies}
+                onChangeText={setAllergies}
+                placeholder="Examples: Peanuts, Shellfish, Milk"
+                placeholderTextColor="#92988a"
+                multiline
+                textAlignVertical="top"
+            />
+        </>
+    );
+
+    //screen 7: dietary restrictions
+    const renderRestrictions = () => (
+        <>
+            <Text style={styles.restrictionHeading}>
+                Do you have any{'\n'}restrictions?
+            </Text>
+
+            <Text style={styles.helperText}>
+                Enter any dietary restrictions or preferences on ingredients, separated by commas
+            </Text>
+
+            <TextInput
+                style={styles.restrictionsTextArea}
+                value={restrictions}
+                onChangeText={setRestrictions}
+                placeholder="Examples: Vegan, Vegetarian, halal, Onions, Pork, Cilantro"
+                placeholderTextColor="#92988a"
+                multiline
+                textAlignVertical="top"
+            />
+        </>
+    );
+
+    //choose which screen to display based on current step
+    const renderCurrentStep = () => {
+        switch(step)
+        {
+            case 0:
+                return renderDateOfBirth();
+            
+            case 1:
+                return renderGender();
+            
+            case 2:
+                return renderHeightWeight();
+            
+            case 3:
+                return renderActivity();
+            
+            case 4:
+                return renderGoal();
+            
+            case 5:
+                return renderAllergies();
+
+            case 6:
+                return renderRestrictions();
+
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <SafeAreaView style={styles.safeArea}>
+
+            {/* keep layout visible when keyboard opens */}
+            <KeyboardAvoidingView
+                style={styles.flex}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+                <View style={styles.screen}>
+
+                    {/* top navigation row with back arrow and skip */}
+                    <View style={styles.topBar}>
+                        <Pressable
+                            onPress={goBack}
+                            style={styles.backArrow}
+                            accessibilityLabel="Go back"
+                        >
+                            <Text style={styles.backArrowText}>‹</Text>
+                        </Pressable>
+
+                        {/* hide skip on final screen */}
+                        {step < TOTAL_STEPS - 1 && (
+                            <Pressable
+                                onPress={skipStep}
+                                style={styles.skipButton}
+                            >
+                                <Text style={styles.skipText}>Skip</Text>
+                            </Pressable>
+                        )}
+                    </View>
+
+                    {/* highlight progress segments up to current screen */}
+                    <View style={styles.progressBar}>
+                        {Array.from({ length: TOTAL_STEPS }).map((_, index) => (
+                            <View
+                                key={index}
+                                style={[
+                                    styles.progressSegment,
+                                    index <= step && styles.progressActive,
+                                ]}
+                            />
+                        ))}
+                    </View>
+
+                    {/* allow longer screens to scroll if needed */}
+                    <ScrollView
+                        contentContainerStyle={styles.scrollContent}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
+                    >
+                        {renderCurrentStep()}
+                    </ScrollView>
+
+                    {/* keep navigation buttons at bottom of screen */}
+                    <View style={styles.bottomButtons}>
+
+                        {/* dont show back on the first screen */}
+                        {step > 0 && (
+                            <Pressable
+                                onPress={goBack}
+                                disabled={saving}
+                                style={({ pressed }) => [
+                                    styles.actionButton,
+                                    styles.secondaryButton,
+                                    pressed && styles.pressedButton,
+                                ]}
+                            >
+                                <Text style={styles.buttonText}>Back</Text>
+                            </Pressable>
+                        )}
+
+                        {/* continue advance the form and finish saves it */}
+                        <Pressable
+                            onPress={continueStep}
+                            disabled={saving}
+                            style={({ pressed }) => [
+                                styles.actionButton,
+                                styles.continueButton,
+                                pressed && styles.pressedButton,
+                                saving && styles.disabledButton,
+                            ]}
+                        >
+                            <Text style={styles.buttonText}>
+                                {saving
+                                    ? 'Saving...'
+                                    : step === TOTAL_STEPS - 1
+                                        ? 'Finish'
+                                        : 'Continue'}
+                            </Text>
+                        </Pressable>
+                    </View>
+                </View>
+            </KeyboardAvoidingView>
+        </SafeAreaView>
     );
 }
 
-//styles used throughout screen
 const styles = StyleSheet.create({
-    container: 
+    flex: 
     {
         flex: 1,
     },
@@ -454,109 +761,354 @@ const styles = StyleSheet.create({
     safeArea: 
     {
         flex: 1,
+        backgroundColor: COLORS.background,
+    },
+
+    screen:
+    {
+        flex: 1,
+        backgroundColor: COLORS.background,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 18,
+    },
+
+    //header containing back arrow and skip button
+    topBar:
+    {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        minHeight: 30,
+        marginBottom: 14,
+    },
+
+    backArrow:
+    {
+        width: 16,
+        height: 48,
+        justifyContent: 'center',
+    },
+
+    backArrowText:
+    {
+        fontSize: 34,
+        lineHeight: 34,
+        fontWeight: '700',
+        color: COLORS.green,
+    },
+
+    skipButton:
+    {
+        paddingHorizontal: 4,
+        paddingVertical: 6,
+    },
+
+    skipText:
+    {
+        fontSize: 18,
+        color: COLORS.green,
+    },
+
+    //seven horizontal segments show progress through the questions
+    progressBar:
+    {
+        flexDirection: 'row',
+        gap: 4,
+        marginBottom: 26,
+    },
+
+    progressSegment:
+    {
+        flex: 1,
+        height: 4,
+        borderRadius: 3,
+        backgroundColor: COLORS.white,
+    },
+
+    progressActive:
+    {
+        backgroundColor: COLORS.green,
     },
 
     scrollContent:
     {
-        padding: 24,
-        paddingBottom: 40,
+        flexGrow: 1,
+        paddingBottom: 18,
+    },
+ 
+    dateOfBirthHeading:
+    {
+        fontSize: 32,
+        fontWeight: '700',
+        lineHeight: 35,
+        color: COLORS.text,
+        textAlign: 'center',
+        marginTop: 10,
+        marginBottom: 25,
     },
 
-    header:
+    //size the scrolling date picker inside its white box
+    datePicker:
     {
-        marginBottom: 32,
+        width: '100%',
+        height: 190,
+        alignSelf: 'center',
     },
 
-    headerTitle:
+    //white box containing date inputs
+    dateCard:
     {
-        fontSize: 36,
-        lineHeight: 42,
-        marginBottom: 12,
+        marginTop: 30,
+        flexDirection: 'row',
+        backgroundColor: COLORS.white,
+        borderRadius: 18,
+        padding: 10,
+        gap: 8,
+        minHeight: 220,
     },
 
-    headerDescription:
+    genderHeading:
     {
-        fontSize: 16,
-        lineHeight: 24,
+        fontSize: 32,
+        fontWeight: '700',
+        lineHeight: 35,
+        color: COLORS.text,
+        textAlign: 'center',
+        marginTop: 10,
+        marginBottom: 25,
     },
 
-    section:
+    heightWeightHeading:
     {
-        marginBottom: 28,
+        fontSize: 32,
+        fontWeight: '700',
+        lineHeight: 35,
+        color: COLORS.text,
+        textAlign: 'center',
+        marginTop: 10,
+        marginBottom: 25,
     },
 
-    label:
+    //side by side fields for ft and in
+    measurementRow: 
     {
-        marginBottom: 10,
+        flexDirection: 'row',
+        gap: 18,
     },
 
-    helperText:
+    measurementColumn: 
     {
-        marginBottom: 10,
+        flex: 1,
+        marginTop: 30,
     },
 
-    textInput:
+    //shared styling for measurement inputs
+    input: 
     {
-        minHeight: 50,
-        borderWidth: 1,
-        borderRadius: 10,
-        paddingHorizontal: 16,
-        fontSize: 16,
+        minHeight: 42,
+        borderRadius: 9,
+        backgroundColor: COLORS.white,
+        paddingHorizontal: 12,
+        fontSize: 15,
+        color: COLORS.text,
     },
 
-    allergyInput:
+    weightSection: 
     {
-        minHeight: 90,
-        paddingTop: 14,
-        textAlignVertical: 'top',
+        marginTop: 35,
     },
 
-    optionsContainer:
+    activityLevelHeading:
     {
-        gap: 10,
+        fontSize: 32,
+        fontWeight: '700',
+        lineHeight: 35,
+        color: COLORS.text,
+        textAlign: 'center',
+        marginTop: 10,
+        marginBottom: 25,
     },
 
-    optionButton:
+    goalHeading:
     {
-        minHeight: 50,
-        borderWidth: 1,
-        borderRadius: 10,
-        paddingHorizontal: 16,
+        fontSize: 32,
+        fontWeight: '700',
+        lineHeight: 35,
+        color: COLORS.text,
+        textAlign: 'center',
+        marginTop: 10,
+        marginBottom: 25,
+    },
+
+    goalInput:
+    {
+        minHeight: 180,
+        fontSize: 14,
+        lineHeight: 20,
+        color: COLORS.text,
+        padding: 2,
+        paddingTop: 0,
+    },
+
+    allergyHeading:
+    {
+        fontSize: 32,
+        fontWeight: '700',
+        lineHeight: 35,
+        color: COLORS.text,
+        textAlign: 'center',
+        marginTop: 10,
+        marginBottom: 25,
+    },
+
+    restrictionHeading:
+    {
+        fontSize: 32,
+        fontWeight: '700',
+        lineHeight: 35,
+        color: COLORS.text,
+        textAlign: 'center',
+        marginTop: 10,
+        marginBottom: 25,
+    },
+
+    options:
+    {
+        gap: 13,
+        marginTop: 20,
+    },
+
+    //stack selection button vertically
+    option:
+    {
+        minHeight: 48,
+        borderRadius: 12,
+        backgroundColor: COLORS.white,
         justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        borderWidth: 1,
+        borderColor: 'transparent',
+    },
+
+    //highlight the selected option
+    selectedOption:
+    {
+        backgroundColor: COLORS.selected,
+        borderColor: COLORS.green,
     },
 
     optionText:
     {
         fontSize: 16,
-        fontWeight: '500',
+        color: COLORS.secondary,
+        textAlign: 'center',
     },
 
-    errorText:
+    selectedOptionText:
     {
-        color: '#d32f2f',
-        marginBottom: 16,
+        color: COLORS.green,
         fontWeight: '600',
     },
 
-    continueButton:
+    fieldLabel:
     {
-        minHeight: 54,
-        borderRadius: 12,
-        backgroundColor: '#3c87f7',
+        fontSize: 14,
+        color: COLORS.secondary,
+        marginBottom: 4,
+        marginLeft: 5,
+    },
+
+    helperText: 
+    {
+        color: '#899180',
+        fontSize: 11,
+        lineHeight: 15,
+        textAlign: 'center',
+        marginTop: -5,
+        marginBottom: 30,
+        paddingHorizontal: 8,
+    },
+
+    //white box used to display goal options
+    textAreaCard: 
+    {
+        backgroundColor: COLORS.white,
+        borderRadius: 17,
+        padding: 14,
+        gap: 13,
+    },
+    
+    //box for allergies
+    allergiesTextArea: 
+    {
+        height: 208,
+        backgroundColor: COLORS.white,
+        borderRadius: 17,
+        padding: 16,
+        fontSize: 14,
+        lineHeight: 17,
+        color: COLORS.text,
+        marginTop: 16,
+    },
+
+    //box for restrictions
+    restrictionsTextArea:
+    {
+        height: 210,
+        backgroundColor: COLORS.white,
+        borderRadius: 17,
+        padding: 16,
+        fontSize: 14,
+        lineHeight: 17,
+        color: COLORS.text,
+        marginTop: 1,
+    },
+
+    //place back and continue side by side
+    bottomButtons: 
+    {
+        flexDirection: 'row',
+        gap: 10,
+        marginTop: 12,
+    },
+
+    actionButton: 
+    {
+        flex: 1,
+        minHeight: 43,
+        borderRadius: 7,
         justifyContent: 'center',
         alignItems: 'center',
-        marginTop: 8,
+        paddingHorizontal: 8,
     },
 
-    buttonPressed:
+    continueButton: 
     {
-        opacity: 0.7,
+        backgroundColor: COLORS.green,
     },
 
-    buttonText:
+    secondaryButton: 
     {
-        color: '#ffffff',
-        fontSize: 17,
+        backgroundColor: COLORS.green,
+    },
+
+    buttonText: 
+    {
+        color: COLORS.white,
+        fontSize: 15,
         fontWeight: '700',
+    },
+
+    pressedButton: 
+    {
+        opacity: 0.8,
+    },
+
+    disabledButton: 
+    {
+        opacity: 0.6,
     },
 });
