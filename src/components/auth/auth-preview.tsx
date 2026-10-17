@@ -23,9 +23,27 @@ const colors = {
 type Mode = 'signup' | 'login';
 type Field = 'email' | 'password' | 'confirm';
 
-// Temporary entry buttons for testing the forms from the existing Home screen.
+// Match Supabase's strongest built-in character policy. Spaces do not count as symbols.
+// Keep password rules on signup only so existing users can still attempt login.
+export function signupPasswordErrors(password: string): string[] {
+  const missing: string[] = [];
+  const symbols = "!@#$%^&*()_+-=[]{};'\\\":|<>?,./`~";
+  if (password.length < 8) missing.push('at least 8 characters');
+  if (!/[a-z]/.test(password)) missing.push('a lowercase letter');
+  if (!/[A-Z]/.test(password)) missing.push('an uppercase letter');
+  if (!/[0-9]/.test(password)) missing.push('a number');
+  if (![...password].some((character) => symbols.includes(character))) {
+    missing.push('a special character such as !, @, or #');
+  }
+  return missing;
+}
+
+
+// Authentication controls for the welcome screen and signed-in placeholder.
 // A native modal covers the tabs without changing Expo Router's layout or moving routes.
-export default function AuthPreview() {
+export default function AuthPreview({ onSignedInChange }: {
+  onSignedInChange?: (signedIn: boolean) => void;
+}) {
   const [mode, setMode] = useState<Mode | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
@@ -75,6 +93,11 @@ export default function AuthPreview() {
     return () => { active = false; };
   }, []);
 
+  // Let the welcome page show a different heading once a session is available.
+  useEffect(() => {
+    onSignedInChange?.(session !== null);
+  }, [session, onSignedInChange]);
+
   async function signOut() {
     if (signingOut.current) return;
     signingOut.current = true;
@@ -96,7 +119,7 @@ export default function AuthPreview() {
   function authenticated(next: Session) {
     setSession(next);
     setStatus('You are signed in.');
-    setMode(null); // Return to the existing Home screen; intake routing comes later.
+    setMode(null); // Show the signed-in placeholder until intake/Home routes are ready.
   }
   return (
     <View style={styles.entry}>
@@ -175,10 +198,13 @@ function AuthForm({ mode, onSwitch, onClose, onBusy, onAuthenticated }: {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       next.email = 'Enter a valid email address.';
     }
-    // Sign Up checks a proposed minimum; Login accepts any nonempty password.
+    // Check the agreed password policy for signup; Login accepts any nonempty password.
     // Preserve password whitespace because it may be intentional.
     if (!password) next.password = 'Enter your password.';
-    else if (signup && password.length < 8) next.password = 'Use at least 8 characters.';
+    else if (signup) {
+      const missing = signupPasswordErrors(password);
+      if (missing.length) next.password = `Include ${missing.join(', ')}.`;
+    }
     if (signup && !confirm) next.confirm = 'Confirm your password.';
     else if (signup && password !== confirm) next.confirm = 'Your passwords do not match.';
     setErrors(next);
@@ -199,9 +225,9 @@ function AuthForm({ mode, onSwitch, onClose, onBusy, onAuthenticated }: {
       if (data.session) {
         onAuthenticated(data.session);
       } else if (signup) {
-        // No session is normal when email confirmation is required.
-        // Avoid claiming a new account exists: Supabase can mask duplicate signups.
-        setNotice('Check your email for a confirmation link. After confirming, return here and log in. If you already have an account, use Log In.');
+        // Do not claim signup succeeded if the server did not return a session.
+        // This fallback also supports teammates who still have confirmation enabled.
+        setNotice('Signup did not return a signed-in session. If an email confirmation was sent, confirm it before logging in. Otherwise, try Log In or check the project’s Email provider settings.');
       } else {
         setNotice('No login session was returned. Please try again.');
       }
@@ -252,7 +278,7 @@ function AuthForm({ mode, onSwitch, onClose, onBusy, onAuthenticated }: {
                   style={styles.passwordInput}
                   value={password}
                   onChangeText={(value) => update('password', value)}
-                  placeholder={signup ? 'At least 8 characters' : 'Enter your password'}
+                  placeholder={signup ? 'Create a strong password' : 'Enter your password'}
                   placeholderTextColor={colors.muted}
                   secureTextEntry={!visible}
                   autoCapitalize="none"
@@ -271,6 +297,12 @@ function AuthForm({ mode, onSwitch, onClose, onBusy, onAuthenticated }: {
                 </Pressable>
               </View>
               {errors.password && <Text accessibilityRole="alert" style={styles.error}>{errors.password}</Text>}
+              {signup && (
+                <Text style={styles.passwordHint}>
+                  Use at least 8 characters, including an uppercase letter, a lowercase letter,
+                  a number, and a special character such as !, @, or #.
+                </Text>
+              )}
               {/* Confirmation is only needed when creating a new account. */}
               {signup && (
                 <>
@@ -336,6 +368,7 @@ const styles = StyleSheet.create({
   passwordInput: { flex: 1, minWidth: 0, minHeight: 52, paddingHorizontal: 14, paddingVertical: 12, color: colors.ink, fontSize: 16 },
   textButton: { minHeight: 48, paddingHorizontal: 12, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
   link: { color: colors.green, fontWeight: '700', fontSize: 15, textDecorationLine: 'underline' },
+  passwordHint: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 8 },
   invalid: { borderColor: colors.error },
   error: { color: colors.error, marginTop: 6, fontSize: 14 },
   button: { backgroundColor: colors.green, borderRadius: 12, minHeight: 54, alignItems: 'center', justifyContent: 'center', padding: 14 },

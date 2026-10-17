@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createClient, processLock } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 import 'react-native-url-polyfill/auto';
 
@@ -32,11 +32,9 @@ export function getSupabase(): SupabaseClient {
       persistSession: true,
       autoRefreshToken: true,
 
-      // For now, confirm email in the browser, then log in manually.
+      // Email confirmation is disabled in the shared Supabase Email provider settings.
       detectSessionInUrl: false,
 
-      // Coordinate simultaneous session operations on phones.
-      ...(Platform.OS !== 'web' ? { lock: processLock } : {}),
     },
   });
 
