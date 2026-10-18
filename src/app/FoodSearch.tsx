@@ -2,6 +2,7 @@ import { Image } from 'expo-image';
 import { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    Modal,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -13,19 +14,41 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Brand colors + type scale — the single source of truth for styling.
 import { colors, fontSize } from '@/theme/tokens';
-import { searchFoods, type FoodSearchItem } from '@/lib/fatsecret';
+import {
+    getRecipeTypes,
+    searchFoods,
+    searchRecipes,
+    type FoodSearchItem,
+    type RecipeItem,
+} from '@/lib/fatsecret';
 
-const CATEGORIES = ['All foods', 'Recipes', 'Ingredients'];
-const FILTERS = ['Meal type', 'Diet', 'Prep time'];
-// Sort labels we cycle through on tap (visual only for now — no real sorting).
-const SORTS = ['Relevance', 'Calories', 'Protein'];
+type Tab = 'All foods' | 'Recipes' | 'Ingredients';
+const TABS: Tab[] = ['All foods', 'Recipes', 'Ingredients'];
 
-const DEFAULT_QUERY = 'bowl';
+// Empty = browse. Recipes browse freely with no term; FatSecret's FOOD search
+// needs a term, so the food tabs fall back to this seed when the box is empty.
+const DEFAULT_QUERY = '';
+const FOOD_BROWSE_SEED = 'chicken';
+
+// Prep-time presets. `to` is an upper bound in minutes.
+const PREP_OPTIONS: { label: string; to?: number }[] = [
+    { label: 'Any' },
+    { label: '≤ 15 min', to: 15 },
+    { label: '≤ 30 min', to: 30 },
+    { label: '≤ 60 min', to: 60 },
+];
+
+// Recipe sort options (map to recipes.search `sort_by`).
+const RECIPE_SORTS: { label: string; value: string }[] = [
+    { label: 'Newest', value: 'newest' },
+    { label: 'Fewest cal', value: 'caloriesPerServingAscending' },
+    { label: 'Most cal', value: 'caloriesPerServingDescending' },
+];
 
 // Round a nutrition value for display, or show a dash when it's missing.
 const fmt = (n: number | null) => (n == null ? '—' : String(Math.round(n)));
 
-// Reusable pill used for both the category chips and the filter dropdowns.
+// Reusable pill used for both the category tabs and the filter dropdowns.
 function FilterChip({
     label,
     selected = false,
@@ -53,6 +76,7 @@ function FilterChip({
                     styles.chipText,
                     selected ? styles.chipTextSelected : styles.chipTextUnselected,
                 ]}
+                numberOfLines={1}
             >
                 {label}
             </Text>
@@ -61,99 +85,240 @@ function FilterChip({
     );
 }
 
-// One result card in the 2-column grid.
-function FoodCard({ item }: { item: FoodSearchItem }) {
+// A small bottom-sheet dropdown of options (doesn't leave the screen).
+function OptionsSheet<T>({
+    visible,
+    title,
+    options,
+    selected,
+    onSelect,
+    onClose,
+}: {
+    visible: boolean;
+    title: string;
+    options: { label: string; value: T }[];
+    selected: T;
+    onSelect: (value: T) => void;
+    onClose: () => void;
+}) {
+    return (
+        <Modal
+            visible={visible}
+            transparent
+            animationType="fade"
+            onRequestClose={onClose}
+        >
+            {/* Tapping outside the box dismisses it. */}
+            <Pressable style={styles.popoverBackdrop} onPress={onClose}>
+                <Pressable style={styles.popover} onPress={() => {}}>
+                    <Text style={styles.popoverTitle}>{title}</Text>
+                    <ScrollView
+                        style={styles.popoverScroll}
+                        bounces={false}
+                        showsVerticalScrollIndicator
+                    >
+                        {options.map((opt) => {
+                            const isSelected = opt.value === selected;
+                            return (
+                                <Pressable
+                                    key={opt.label}
+                                    style={styles.popoverOption}
+                                    onPress={() => {
+                                        onSelect(opt.value);
+                                        onClose();
+                                    }}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.popoverOptionText,
+                                            isSelected &&
+                                                styles.popoverOptionTextSelected,
+                                        ]}
+                                    >
+                                        {opt.label}
+                                    </Text>
+                                    {isSelected && (
+                                        <Text style={styles.popoverCheck}>
+                                            ✓
+                                        </Text>
+                                    )}
+                                </Pressable>
+                            );
+                        })}
+                    </ScrollView>
+                </Pressable>
+            </Pressable>
+        </Modal>
+    );
+}
+
+// Shared card shell (image + title + meta + tag).
+function ResultCard({
+    image,
+    placeholder,
+    title,
+    meta,
+    subMeta,
+    tag,
+}: {
+    image: string | null;
+    placeholder: string;
+    title: string;
+    meta: string;
+    subMeta?: string | null;
+    tag?: string | null;
+}) {
+    // Fall back to the placeholder if the image URL fails to load (dead/blocked).
+    const [imgFailed, setImgFailed] = useState(false);
+    const showImage = !!image && !imgFailed;
     return (
         <Pressable
             style={({ pressed }) => [styles.card, pressed && styles.pressed]}
             accessibilityRole="button"
         >
-            {/* Real food photo when available (Premier images), else a placeholder. */}
             <View style={styles.cardImage}>
-                {item.image ? (
+                {showImage ? (
                     <Image
-                        source={{ uri: item.image }}
+                        source={{ uri: image }}
                         style={styles.cardImageFill}
                         contentFit="cover"
                         transition={150}
+                        onError={() => setImgFailed(true)}
                     />
                 ) : (
-                    <Text style={styles.cardImageEmoji}>🍽️</Text>
+                    <Text style={styles.cardImageEmoji}>{placeholder}</Text>
                 )}
             </View>
 
             <Text style={styles.cardTitle} numberOfLines={2}>
-                {item.name}
+                {title}
             </Text>
 
-            <Text style={styles.cardMeta}>
-                {fmt(item.calories)} cal • {fmt(item.protein)} g protein
-            </Text>
-
-            {item.serving && (
-                <Text style={styles.cardMeta}>Per {item.serving}</Text>
-            )}
-
-            <Text style={styles.cardTag} numberOfLines={1}>
-                {item.brand || 'Generic'}
-            </Text>
+            <Text style={styles.cardMeta}>{meta}</Text>
+            {subMeta ? <Text style={styles.cardMeta}>{subMeta}</Text> : null}
+            {tag ? (
+                <Text style={styles.cardTag} numberOfLines={1}>
+                    {tag}
+                </Text>
+            ) : null}
         </Pressable>
     );
 }
 
+function FoodCard({ item }: { item: FoodSearchItem }) {
+    return (
+        <ResultCard
+            image={item.image}
+            placeholder="🍽️"
+            title={item.name}
+            meta={`${fmt(item.calories)} cal • ${fmt(item.protein)} g protein`}
+            subMeta={item.serving ? `Per ${item.serving}` : null}
+            tag={item.brand || 'Generic'}
+        />
+    );
+}
+
+function RecipeCard({ item }: { item: RecipeItem }) {
+    return (
+        <ResultCard
+            image={item.image}
+            placeholder="🍲"
+            title={item.name}
+            meta={`${fmt(item.calories)} cal • ${fmt(item.protein)} g protein`}
+            tag={item.types[0] || null}
+        />
+    );
+}
+
 export default function FoodSearch() {
+    const [activeTab, setActiveTab] = useState<Tab>('All foods');
     const [query, setQuery] = useState(DEFAULT_QUERY);
     const [submittedQuery, setSubmittedQuery] = useState(DEFAULT_QUERY);
-    const [results, setResults] = useState<FoodSearchItem[]>([]);
+
+    const [foods, setFoods] = useState<FoodSearchItem[]>([]);
+    const [recipes, setRecipes] = useState<RecipeItem[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(0);
     const [loading, setLoading] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Visual-only state (chips/sort don't filter yet).
-    const [selectedCategory, setSelectedCategory] = useState(CATEGORIES[0]);
-    const [sortIndex, setSortIndex] = useState(0);
+    // Recipe-only filters (applied only on the Recipes tab).
+    const [recipeTypes, setRecipeTypes] = useState<string[]>([]);
+    const [mealType, setMealType] = useState<string | null>(null);
+    const [prepIdx, setPrepIdx] = useState(0);
+    const [sortIdx, setSortIdx] = useState(0);
+
+    // Which filter dropdown sheet is open (null = none).
+    const [openSheet, setOpenSheet] = useState<
+        'mealType' | 'prepTime' | 'sort' | null
+    >(null);
+
+    const isRecipes = activeTab === 'Recipes';
+
+    // Fetch the meal-type options once (for the Recipes filter).
+    useEffect(() => {
+        getRecipeTypes()
+            .then(setRecipeTypes)
+            .catch(() => {});
+    }, []);
 
     const runSearch = useCallback(
-        async (q: string, pageToLoad: number, append: boolean) => {
-            const trimmed = q.trim();
-            if (!trimmed) {
-                setResults([]);
-                setTotal(0);
-                return;
-            }
+        async (pageToLoad: number, append: boolean) => {
+            const q = submittedQuery.trim(); // '' = browse (handled by the proxy)
             if (append) setLoadingMore(true);
             else setLoading(true);
             setError(null);
 
             try {
-                const data = await searchFoods(trimmed, { page: pageToLoad });
-                setResults((prev) =>
-                    append ? [...prev, ...data.results] : data.results
-                );
-                setTotal(data.total);
-                setPage(data.page);
-                setSubmittedQuery(trimmed);
+                if (activeTab === 'Recipes') {
+                    const data = await searchRecipes(q, {
+                        page: pageToLoad,
+                        recipeTypes: mealType ?? undefined,
+                        prepTimeTo: PREP_OPTIONS[prepIdx].to,
+                        sortBy: RECIPE_SORTS[sortIdx].value,
+                    });
+                    setRecipes((prev) =>
+                        append ? [...prev, ...data.results] : data.results
+                    );
+                    setTotal(data.total);
+                    setPage(data.page);
+                } else {
+                    // Food search needs a term — seed it when browsing empty.
+                    const data = await searchFoods(q || FOOD_BROWSE_SEED, {
+                        page: pageToLoad,
+                    });
+                    setFoods((prev) =>
+                        append ? [...prev, ...data.results] : data.results
+                    );
+                    setTotal(data.total);
+                    setPage(data.page);
+                }
             } catch (e) {
                 setError(
                     e instanceof Error ? e.message : 'Something went wrong'
                 );
-                if (!append) setResults([]);
+                if (!append) {
+                    setFoods([]);
+                    setRecipes([]);
+                }
             } finally {
                 if (append) setLoadingMore(false);
                 else setLoading(false);
             }
         },
-        []
+        [activeTab, submittedQuery, mealType, prepIdx, sortIdx]
     );
 
-    // Run an initial search so the screen isn't empty on open.
+    // Re-run whenever the tab, query, or recipe filters change.
     useEffect(() => {
-        runSearch(DEFAULT_QUERY, 0, false);
+        runSearch(0, false);
     }, [runSearch]);
 
-    const canLoadMore = results.length > 0 && results.length < total;
+    const count = isRecipes ? recipes.length : foods.length;
+    const canLoadMore = count > 0 && count < total;
+
+    const prepLabel = prepIdx === 0 ? 'Prep time' : PREP_OPTIONS[prepIdx].label;
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -175,7 +340,7 @@ export default function FoodSearch() {
                         style={styles.searchInput}
                         value={query}
                         onChangeText={setQuery}
-                        onSubmitEditing={() => runSearch(query, 0, false)}
+                        onSubmitEditing={() => setSubmittedQuery(query)}
                         returnKeyType="search"
                         placeholder="Search foods"
                         placeholderTextColor={colors.textMuted}
@@ -183,7 +348,11 @@ export default function FoodSearch() {
                     />
                     {query.length > 0 && (
                         <Pressable
-                            onPress={() => setQuery('')}
+                            onPress={() => {
+                                // Clearing returns to the default browse view.
+                                setQuery('');
+                                setSubmittedQuery('');
+                            }}
                             accessibilityLabel="Clear search"
                             hitSlop={10}
                         >
@@ -192,41 +361,59 @@ export default function FoodSearch() {
                     )}
                 </View>
 
-                {/* Category chips */}
+                {/* Tabs (each queries a different source) */}
                 <View style={styles.chipRow}>
-                    {CATEGORIES.map((category) => (
+                    {TABS.map((tab) => (
                         <FilterChip
-                            key={category}
-                            label={category}
-                            selected={selectedCategory === category}
-                            onPress={() => setSelectedCategory(category)}
+                            key={tab}
+                            label={tab}
+                            selected={activeTab === tab}
+                            onPress={() => setActiveTab(tab)}
                         />
                     ))}
                 </View>
 
-                {/* Filter dropdowns (static visuals for now) */}
+                {/* Filters (Meal type + Prep time are live on the Recipes tab) */}
                 <View style={styles.chipRow}>
-                    {FILTERS.map((filter) => (
-                        <FilterChip key={filter} label={filter} showChevron />
-                    ))}
+                    <FilterChip
+                        label={mealType ?? 'Meal type'}
+                        selected={isRecipes && !!mealType}
+                        showChevron
+                        onPress={
+                            isRecipes ? () => setOpenSheet('mealType') : undefined
+                        }
+                    />
+                    <FilterChip label="Diet" showChevron />
+                    <FilterChip
+                        label={prepLabel}
+                        selected={isRecipes && prepIdx > 0}
+                        showChevron
+                        onPress={
+                            isRecipes ? () => setOpenSheet('prepTime') : undefined
+                        }
+                    />
                 </View>
 
                 {/* Results header */}
                 <View style={styles.resultsHeader}>
                     <Text style={styles.resultsCount}>
-                        {total} results for &ldquo;{submittedQuery}&rdquo;
+                        {submittedQuery
+                            ? `${total} results for “${submittedQuery}”`
+                            : `${total} ${isRecipes ? 'recipes' : 'foods'}`}
                     </Text>
-                    <Pressable
-                        onPress={() =>
-                            setSortIndex((current) => (current + 1) % SORTS.length)
-                        }
-                        accessibilityRole="button"
-                    >
-                        <Text style={styles.sortLabel}>{SORTS[sortIndex]} ⌄</Text>
-                    </Pressable>
+                    {isRecipes && (
+                        <Pressable
+                            onPress={() => setOpenSheet('sort')}
+                            accessibilityRole="button"
+                        >
+                            <Text style={styles.sortLabel}>
+                                {RECIPE_SORTS[sortIdx].label} ⌄
+                            </Text>
+                        </Pressable>
+                    )}
                 </View>
 
-                {/* Results area: loading / error / empty / grid */}
+                {/* Results area */}
                 {loading ? (
                     <View style={styles.centerBox}>
                         <ActivityIndicator color={colors.primary} />
@@ -235,33 +422,36 @@ export default function FoodSearch() {
                     <View style={styles.centerBox}>
                         <Text style={styles.errorText}>{error}</Text>
                         <Pressable
-                            onPress={() => runSearch(submittedQuery, 0, false)}
+                            onPress={() => runSearch(0, false)}
                             style={styles.retryButton}
                         >
                             <Text style={styles.retryText}>Try again</Text>
                         </Pressable>
                     </View>
-                ) : results.length === 0 ? (
+                ) : count === 0 ? (
                     <View style={styles.centerBox}>
                         <Text style={styles.emptyText}>
-                            No foods found. Try a different search.
+                            No {isRecipes ? 'recipes' : 'foods'} found. Try a
+                            different search.
                         </Text>
                     </View>
                 ) : (
                     <>
                         <View style={styles.grid}>
-                            {results.map((item) => (
-                                <FoodCard key={item.id} item={item} />
-                            ))}
+                            {isRecipes
+                                ? recipes.map((item) => (
+                                      <RecipeCard key={item.id} item={item} />
+                                  ))
+                                : foods.map((item) => (
+                                      <FoodCard key={item.id} item={item} />
+                                  ))}
                         </View>
 
-                        {/* View more (pagination) */}
                         {canLoadMore && (
                             <Pressable
                                 style={styles.viewMore}
                                 onPress={() =>
-                                    !loadingMore &&
-                                    runSearch(submittedQuery, page + 1, true)
+                                    !loadingMore && runSearch(page + 1, true)
                                 }
                                 accessibilityRole="button"
                             >
@@ -269,7 +459,7 @@ export default function FoodSearch() {
                                     <ActivityIndicator color={colors.primary} />
                                 ) : (
                                     <Text style={styles.viewMoreText}>
-                                        View more foods ↓
+                                        View more {isRecipes ? 'recipes' : 'foods'} ↓
                                     </Text>
                                 )}
                             </Pressable>
@@ -287,6 +477,35 @@ export default function FoodSearch() {
                     </Text>
                 </View>
             </ScrollView>
+
+            {/* Filter dropdown sheets (Recipes tab) */}
+            <OptionsSheet<string | null>
+                visible={openSheet === 'mealType'}
+                title="Meal type"
+                options={[
+                    { label: 'Any', value: null },
+                    ...recipeTypes.map((t) => ({ label: t, value: t })),
+                ]}
+                selected={mealType}
+                onSelect={setMealType}
+                onClose={() => setOpenSheet(null)}
+            />
+            <OptionsSheet<number>
+                visible={openSheet === 'prepTime'}
+                title="Prep time"
+                options={PREP_OPTIONS.map((o, i) => ({ label: o.label, value: i }))}
+                selected={prepIdx}
+                onSelect={setPrepIdx}
+                onClose={() => setOpenSheet(null)}
+            />
+            <OptionsSheet<number>
+                visible={openSheet === 'sort'}
+                title="Sort by"
+                options={RECIPE_SORTS.map((s, i) => ({ label: s.label, value: i }))}
+                selected={sortIdx}
+                onSelect={setSortIdx}
+                onClose={() => setOpenSheet(null)}
+            />
         </SafeAreaView>
     );
 }
@@ -345,7 +564,7 @@ const styles = StyleSheet.create({
         color: colors.textMuted,
     },
 
-    // Chip rows (categories + filters)
+    // Chip rows (tabs + filters)
     chipRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
@@ -360,6 +579,7 @@ const styles = StyleSheet.create({
         height: 36,
         borderRadius: 18,
         borderWidth: 1,
+        maxWidth: '100%',
     },
 
     chipSelected: {
@@ -540,5 +760,66 @@ const styles = StyleSheet.create({
 
     pressed: {
         opacity: 0.85,
+    },
+
+    // Dropdown popover (small box layered over the screen)
+    popoverBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 32,
+    },
+
+    popover: {
+        width: '100%',
+        maxWidth: 300,
+        maxHeight: '60%',
+        backgroundColor: colors.surface,
+        borderRadius: 16,
+        paddingTop: 6,
+        paddingBottom: 6,
+        overflow: 'hidden',
+    },
+
+    popoverTitle: {
+        fontSize: fontSize.md,
+        fontWeight: '700',
+        color: colors.heading,
+        paddingHorizontal: 18,
+        paddingVertical: 12,
+    },
+
+    popoverScroll: {
+        flexGrow: 0,
+        flexShrink: 1,
+    },
+
+    popoverOption: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 18,
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+    },
+
+    popoverOptionText: {
+        fontSize: fontSize.base,
+        color: colors.text,
+        flexShrink: 1,
+    },
+
+    popoverOptionTextSelected: {
+        color: colors.primary,
+        fontWeight: '600',
+    },
+
+    popoverCheck: {
+        fontSize: fontSize.base,
+        color: colors.primary,
+        fontWeight: '700',
+        marginLeft: 8,
     },
 });

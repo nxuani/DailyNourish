@@ -1,9 +1,9 @@
-// App-side client for food search.
+// App-side client for food & recipe search.
 //
 // The app NEVER talks to FatSecret directly (that would leak the secret and get
-// blocked by FatSecret's IP allowlist). It talks only to our proxy — see
-// server/README.md for how the proxy is deployed. The proxy URL is not secret,
-// so it's fine as an EXPO_PUBLIC value.
+// blocked by FatSecret's IP allowlist). It talks only to our proxy — see the
+// dailynourish-proxy repo. The proxy URL is not secret, so it's fine as an
+// EXPO_PUBLIC value.
 
 const PROXY_URL = process.env.EXPO_PUBLIC_FATSECRET_PROXY_URL;
 
@@ -12,7 +12,35 @@ const PROXY_URL = process.env.EXPO_PUBLIC_FATSECRET_PROXY_URL;
 // approach (later) is verifying the user's Supabase JWT inside the proxy.
 const PROXY_TOKEN = process.env.EXPO_PUBLIC_FATSECRET_PROXY_TOKEN;
 
-// One normalized search result, as the proxy returns it.
+type QueryParams = Record<string, string | number | undefined>;
+
+async function proxyGet<T>(path: string, params: QueryParams): Promise<T> {
+    if (!PROXY_URL) {
+        throw new Error(
+            'EXPO_PUBLIC_FATSECRET_PROXY_URL is not set — add the proxy URL to .env'
+        );
+    }
+
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== '') qs.set(key, String(value));
+    }
+    const url = `${PROXY_URL}${path}${qs.toString() ? `?${qs.toString()}` : ''}`;
+
+    const res = await fetch(url, {
+        headers: PROXY_TOKEN ? { 'x-proxy-token': PROXY_TOKEN } : undefined,
+    });
+    if (!res.ok) {
+        const body = (await res
+            .json()
+            .catch(() => ({}))) as { error?: string };
+        throw new Error(body.error || `Request failed (${res.status})`);
+    }
+    return (await res.json()) as T;
+}
+
+// ---- Foods (the nutrition/ingredient database) -----------------------------
+
 export type FoodSearchItem = {
     id: string;
     name: string;
@@ -39,30 +67,71 @@ export type SearchOptions = {
     maxResults?: number; // 1–50
 };
 
-export async function searchFoods(
+export function searchFoods(
     query: string,
     { page = 0, maxResults = 20 }: SearchOptions = {}
 ): Promise<FoodSearchResponse> {
-    if (!PROXY_URL) {
-        throw new Error(
-            'EXPO_PUBLIC_FATSECRET_PROXY_URL is not set — deploy the proxy (see server/README.md) and add its URL to .env'
-        );
-    }
-
-    const params = new URLSearchParams({
+    return proxyGet<FoodSearchResponse>('/search', {
         q: query,
-        page: String(page),
-        max: String(maxResults),
+        page,
+        max: maxResults,
     });
+}
 
-    const res = await fetch(`${PROXY_URL}/search?${params.toString()}`, {
-        headers: PROXY_TOKEN ? { 'x-proxy-token': PROXY_TOKEN } : undefined,
+// ---- Recipes (a SEPARATE FatSecret dataset) --------------------------------
+
+export type RecipeItem = {
+    id: string;
+    name: string;
+    description: string | null;
+    image: string | null; // recipe photo (included by default, no offering needed)
+    calories: number | null;
+    protein: number | null;
+    carbs: number | null;
+    fat: number | null;
+    types: string[]; // recipe categories, e.g. ["Main Dishes"]
+};
+
+export type RecipeSearchResponse = {
+    query: string;
+    total: number;
+    page: number;
+    results: RecipeItem[];
+};
+
+export type RecipeSearchOptions = {
+    page?: number;
+    maxResults?: number;
+    recipeTypes?: string; // comma-separated recipe type names (meal type)
+    prepTimeFrom?: number; // minutes
+    prepTimeTo?: number; // minutes
+    sortBy?: string; // newest | oldest | caloriesPerServingAscending | caloriesPerServingDescending
+};
+
+export function searchRecipes(
+    query: string,
+    {
+        page = 0,
+        maxResults = 20,
+        recipeTypes,
+        prepTimeFrom,
+        prepTimeTo,
+        sortBy,
+    }: RecipeSearchOptions = {}
+): Promise<RecipeSearchResponse> {
+    return proxyGet<RecipeSearchResponse>('/recipes', {
+        q: query,
+        page,
+        max: maxResults,
+        recipe_types: recipeTypes,
+        prep_time_from: prepTimeFrom,
+        prep_time_to: prepTimeTo,
+        sort_by: sortBy,
     });
+}
 
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}) as { error?: string });
-        throw new Error(body.error || `Food search failed (${res.status})`);
-    }
-
-    return (await res.json()) as FoodSearchResponse;
+// The list of meal-type / category names, to populate the "Meal type" filter.
+export async function getRecipeTypes(): Promise<string[]> {
+    const data = await proxyGet<{ types: string[] }>('/recipe-types', {});
+    return data.types ?? [];
 }
