@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { Image } from 'expo-image';
+import { useCallback, useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -11,89 +13,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Brand colors + type scale — the single source of truth for styling.
 import { colors, fontSize } from '@/theme/tokens';
-
-// Shape of one search result. Deliberately simple and UI-focused so it can
-// later be produced from a FatSecret API response without changing the cards.
-type FoodItem = {
-    id: string;
-    name: string;
-    calories: number;
-    protein: number; // grams
-    minutes: number;
-    servings: number;
-    tag: string;
-    emoji: string; // stand-in for the food photo until the API provides images
-};
-
-// Mock results (the four from the design + two extra) so we can see the
-// layout before any real search/API is wired up.
-const MOCK_FOODS: FoodItem[] = [
-    {
-        id: '1',
-        name: 'Chicken, Rice &\nSpinach Bowl',
-        calories: 520,
-        protein: 42,
-        minutes: 25,
-        servings: 1,
-        tag: 'Pantry-friendly',
-        emoji: '🍲',
-    },
-    {
-        id: '2',
-        name: 'Salmon &\nQuinoa Bowl',
-        calories: 485,
-        protein: 34,
-        minutes: 30,
-        servings: 1,
-        tag: 'Omega-3 rich',
-        emoji: '🍣',
-    },
-    {
-        id: '3',
-        name: 'Chickpea &\nVeggie Bowl',
-        calories: 410,
-        protein: 19,
-        minutes: 15,
-        servings: 1,
-        tag: 'Vegetarian',
-        emoji: '🥗',
-    },
-    {
-        id: '4',
-        name: 'Tofu &\nBrown Rice Bowl',
-        calories: 450,
-        protein: 26,
-        minutes: 20,
-        servings: 1,
-        tag: 'Plant-based',
-        emoji: '🍚',
-    },
-    {
-        id: '5',
-        name: 'Shrimp &\nAvocado Bowl',
-        calories: 390,
-        protein: 28,
-        minutes: 18,
-        servings: 1,
-        tag: 'Low-carb',
-        emoji: '🥑',
-    },
-    {
-        id: '6',
-        name: 'Lentil & Sweet\nPotato Bowl',
-        calories: 430,
-        protein: 21,
-        minutes: 35,
-        servings: 1,
-        tag: 'High-fiber',
-        emoji: '🍠',
-    },
-];
+import { searchFoods, type FoodSearchItem } from '@/lib/fatsecret';
 
 const CATEGORIES = ['All foods', 'Recipes', 'Ingredients'];
 const FILTERS = ['Meal type', 'Diet', 'Prep time'];
 // Sort labels we cycle through on tap (visual only for now — no real sorting).
 const SORTS = ['Relevance', 'Calories', 'Protein'];
+
+const DEFAULT_QUERY = 'bowl';
+
+// Round a nutrition value for display, or show a dash when it's missing.
+const fmt = (n: number | null) => (n == null ? '—' : String(Math.round(n)));
 
 // Reusable pill used for both the category chips and the filter dropdowns.
 function FilterChip({
@@ -126,47 +56,104 @@ function FilterChip({
             >
                 {label}
             </Text>
-            {showChevron && (
-                <Text style={styles.chipChevron}> ▾</Text>
-            )}
+            {showChevron && <Text style={styles.chipChevron}> ▾</Text>}
         </Pressable>
     );
 }
 
 // One result card in the 2-column grid.
-function FoodCard({ item }: { item: FoodItem }) {
+function FoodCard({ item }: { item: FoodSearchItem }) {
     return (
         <Pressable
             style={({ pressed }) => [styles.card, pressed && styles.pressed]}
             accessibilityRole="button"
         >
-            {/* Placeholder "photo": colored backdrop with a food emoji centered. */}
+            {/* Real food photo when available (Premier images), else a placeholder. */}
             <View style={styles.cardImage}>
-                <Text style={styles.cardImageEmoji}>{item.emoji}</Text>
+                {item.image ? (
+                    <Image
+                        source={{ uri: item.image }}
+                        style={styles.cardImageFill}
+                        contentFit="cover"
+                        transition={150}
+                    />
+                ) : (
+                    <Text style={styles.cardImageEmoji}>🍽️</Text>
+                )}
             </View>
 
-            <Text style={styles.cardTitle}>{item.name}</Text>
-
-            <Text style={styles.cardMeta}>
-                {item.calories} cal • {item.protein} g protein
+            <Text style={styles.cardTitle} numberOfLines={2}>
+                {item.name}
             </Text>
 
             <Text style={styles.cardMeta}>
-                🕐 {item.minutes} min • {item.servings} serving
+                {fmt(item.calories)} cal • {fmt(item.protein)} g protein
             </Text>
 
-            <Text style={styles.cardTag}>{item.tag}</Text>
+            {item.serving && (
+                <Text style={styles.cardMeta}>Per {item.serving}</Text>
+            )}
+
+            <Text style={styles.cardTag} numberOfLines={1}>
+                {item.brand || 'Generic'}
+            </Text>
         </Pressable>
     );
 }
 
 export default function FoodSearch() {
-    // Light local state: enough to feel interactive, no real filtering yet.
-    const [query, setQuery] = useState('bowl');
+    const [query, setQuery] = useState(DEFAULT_QUERY);
+    const [submittedQuery, setSubmittedQuery] = useState(DEFAULT_QUERY);
+    const [results, setResults] = useState<FoodSearchItem[]>([]);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(0);
+    const [loading, setLoading] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    // Visual-only state (chips/sort don't filter yet).
     const [selectedCategory, setSelectedCategory] = useState(CATEGORIES[0]);
     const [sortIndex, setSortIndex] = useState(0);
 
-    const results = MOCK_FOODS;
+    const runSearch = useCallback(
+        async (q: string, pageToLoad: number, append: boolean) => {
+            const trimmed = q.trim();
+            if (!trimmed) {
+                setResults([]);
+                setTotal(0);
+                return;
+            }
+            if (append) setLoadingMore(true);
+            else setLoading(true);
+            setError(null);
+
+            try {
+                const data = await searchFoods(trimmed, { page: pageToLoad });
+                setResults((prev) =>
+                    append ? [...prev, ...data.results] : data.results
+                );
+                setTotal(data.total);
+                setPage(data.page);
+                setSubmittedQuery(trimmed);
+            } catch (e) {
+                setError(
+                    e instanceof Error ? e.message : 'Something went wrong'
+                );
+                if (!append) setResults([]);
+            } finally {
+                if (append) setLoadingMore(false);
+                else setLoading(false);
+            }
+        },
+        []
+    );
+
+    // Run an initial search so the screen isn't empty on open.
+    useEffect(() => {
+        runSearch(DEFAULT_QUERY, 0, false);
+    }, [runSearch]);
+
+    const canLoadMore = results.length > 0 && results.length < total;
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -188,8 +175,11 @@ export default function FoodSearch() {
                         style={styles.searchInput}
                         value={query}
                         onChangeText={setQuery}
+                        onSubmitEditing={() => runSearch(query, 0, false)}
+                        returnKeyType="search"
                         placeholder="Search foods"
                         placeholderTextColor={colors.textMuted}
+                        autoCorrect={false}
                     />
                     {query.length > 0 && (
                         <Pressable
@@ -224,7 +214,7 @@ export default function FoodSearch() {
                 {/* Results header */}
                 <View style={styles.resultsHeader}>
                     <Text style={styles.resultsCount}>
-                        {results.length} results for &ldquo;{query}&rdquo;
+                        {total} results for &ldquo;{submittedQuery}&rdquo;
                     </Text>
                     <Pressable
                         onPress={() =>
@@ -236,20 +226,56 @@ export default function FoodSearch() {
                     </Pressable>
                 </View>
 
-                {/* 2-column results grid */}
-                <View style={styles.grid}>
-                    {results.map((item) => (
-                        <FoodCard key={item.id} item={item} />
-                    ))}
-                </View>
+                {/* Results area: loading / error / empty / grid */}
+                {loading ? (
+                    <View style={styles.centerBox}>
+                        <ActivityIndicator color={colors.primary} />
+                    </View>
+                ) : error ? (
+                    <View style={styles.centerBox}>
+                        <Text style={styles.errorText}>{error}</Text>
+                        <Pressable
+                            onPress={() => runSearch(submittedQuery, 0, false)}
+                            style={styles.retryButton}
+                        >
+                            <Text style={styles.retryText}>Try again</Text>
+                        </Pressable>
+                    </View>
+                ) : results.length === 0 ? (
+                    <View style={styles.centerBox}>
+                        <Text style={styles.emptyText}>
+                            No foods found. Try a different search.
+                        </Text>
+                    </View>
+                ) : (
+                    <>
+                        <View style={styles.grid}>
+                            {results.map((item) => (
+                                <FoodCard key={item.id} item={item} />
+                            ))}
+                        </View>
 
-                {/* View more */}
-                <Pressable
-                    style={styles.viewMore}
-                    accessibilityRole="button"
-                >
-                    <Text style={styles.viewMoreText}>View more foods ↓</Text>
-                </Pressable>
+                        {/* View more (pagination) */}
+                        {canLoadMore && (
+                            <Pressable
+                                style={styles.viewMore}
+                                onPress={() =>
+                                    !loadingMore &&
+                                    runSearch(submittedQuery, page + 1, true)
+                                }
+                                accessibilityRole="button"
+                            >
+                                {loadingMore ? (
+                                    <ActivityIndicator color={colors.primary} />
+                                ) : (
+                                    <Text style={styles.viewMoreText}>
+                                        View more foods ↓
+                                    </Text>
+                                )}
+                            </Pressable>
+                        )}
+                    </>
+                )}
 
                 {/* Pantry inspiration banner */}
                 <View style={styles.banner}>
@@ -374,12 +400,48 @@ const styles = StyleSheet.create({
     },
 
     resultsCount: {
+        flex: 1,
         fontSize: fontSize.lg,
         fontWeight: '700',
         color: colors.heading,
     },
 
     sortLabel: {
+        fontSize: fontSize.base,
+        fontWeight: '600',
+        color: colors.primary,
+    },
+
+    // Loading / error / empty states
+    centerBox: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 48,
+        gap: 12,
+    },
+
+    errorText: {
+        fontSize: fontSize.base,
+        color: colors.warning,
+        textAlign: 'center',
+    },
+
+    emptyText: {
+        fontSize: fontSize.base,
+        color: colors.textMuted,
+        textAlign: 'center',
+    },
+
+    retryButton: {
+        paddingHorizontal: 16,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: colors.primary,
+        justifyContent: 'center',
+    },
+
+    retryText: {
         fontSize: fontSize.base,
         fontWeight: '600',
         color: colors.primary,
@@ -409,6 +471,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 10,
+        overflow: 'hidden',
+    },
+
+    cardImageFill: {
+        width: '100%',
+        height: '100%',
     },
 
     cardImageEmoji: {
@@ -440,6 +508,8 @@ const styles = StyleSheet.create({
     viewMore: {
         alignItems: 'center',
         marginTop: 20,
+        minHeight: 24,
+        justifyContent: 'center',
     },
 
     viewMoreText: {

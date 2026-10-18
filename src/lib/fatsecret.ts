@@ -19,8 +19,8 @@ export type FoodSearchItem = {
     brand: string | null;
     type: string | null;
     url: string | null;
-    description: string | null;
-    serving: string | null;
+    image: string | null; // food photo URL (null unless Premier images are enabled)
+    serving: string | null; // e.g. "240g", "1 serving"
     calories: number | null;
     protein: number | null;
     fat: number | null;
