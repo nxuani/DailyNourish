@@ -65,16 +65,18 @@ export type FoodSearchResponse = {
 export type SearchOptions = {
     page?: number;
     maxResults?: number; // 1–50
+    foodType?: 'generic' | 'brand'; // 'generic' = ingredients; omit for all foods
 };
 
 export function searchFoods(
     query: string,
-    { page = 0, maxResults = 20 }: SearchOptions = {}
+    { page = 0, maxResults = 20, foodType }: SearchOptions = {}
 ): Promise<FoodSearchResponse> {
     return proxyGet<FoodSearchResponse>('/search', {
         q: query,
         page,
         max: maxResults,
+        food_type: foodType,
     });
 }
 

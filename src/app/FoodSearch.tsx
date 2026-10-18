@@ -45,6 +45,13 @@ const RECIPE_SORTS: { label: string; value: string }[] = [
     { label: 'Most cal', value: 'caloriesPerServingDescending' },
 ];
 
+// Dietary preferences — FatSecret's full list is just these two.
+const DIET_OPTIONS: { label: string; value: string | null }[] = [
+    { label: 'Any', value: null },
+    { label: 'Vegetarian', value: 'Vegetarian' },
+    { label: 'Vegan', value: 'Vegan' },
+];
+
 // Round a nutrition value for display, or show a dash when it's missing.
 const fmt = (n: number | null) => (n == null ? '—' : String(Math.round(n)));
 
@@ -249,9 +256,12 @@ export default function FoodSearch() {
     const [prepIdx, setPrepIdx] = useState(0);
     const [sortIdx, setSortIdx] = useState(0);
 
+    // Food-tab filter.
+    const [diet, setDiet] = useState<string | null>(null);
+
     // Which filter dropdown sheet is open (null = none).
     const [openSheet, setOpenSheet] = useState<
-        'mealType' | 'prepTime' | 'sort' | null
+        'mealType' | 'prepTime' | 'sort' | 'diet' | null
     >(null);
 
     const isRecipes = activeTab === 'Recipes';
@@ -285,8 +295,11 @@ export default function FoodSearch() {
                     setPage(data.page);
                 } else {
                     // Food search needs a term — seed it when browsing empty.
+                    // Ingredients tab = generic (non-branded) foods only.
                     const data = await searchFoods(q || FOOD_BROWSE_SEED, {
                         page: pageToLoad,
+                        foodType:
+                            activeTab === 'Ingredients' ? 'generic' : undefined,
                     });
                     setFoods((prev) =>
                         append ? [...prev, ...data.results] : data.results
@@ -318,6 +331,11 @@ export default function FoodSearch() {
     const count = isRecipes ? recipes.length : foods.length;
     const canLoadMore = count > 0 && count < total;
 
+    const noun = isRecipes
+        ? 'recipes'
+        : activeTab === 'Ingredients'
+          ? 'ingredients'
+          : 'foods';
     const prepLabel = prepIdx === 0 ? 'Prep time' : PREP_OPTIONS[prepIdx].label;
 
     return (
@@ -373,25 +391,31 @@ export default function FoodSearch() {
                     ))}
                 </View>
 
-                {/* Filters (Meal type + Prep time are live on the Recipes tab) */}
+                {/* Filters — tab-contextual (recipe filters vs food filters) */}
                 <View style={styles.chipRow}>
-                    <FilterChip
-                        label={mealType ?? 'Meal type'}
-                        selected={isRecipes && !!mealType}
-                        showChevron
-                        onPress={
-                            isRecipes ? () => setOpenSheet('mealType') : undefined
-                        }
-                    />
-                    <FilterChip label="Diet" showChevron />
-                    <FilterChip
-                        label={prepLabel}
-                        selected={isRecipes && prepIdx > 0}
-                        showChevron
-                        onPress={
-                            isRecipes ? () => setOpenSheet('prepTime') : undefined
-                        }
-                    />
+                    {isRecipes ? (
+                        <>
+                            <FilterChip
+                                label={mealType ?? 'Meal type'}
+                                selected={!!mealType}
+                                showChevron
+                                onPress={() => setOpenSheet('mealType')}
+                            />
+                            <FilterChip
+                                label={prepLabel}
+                                selected={prepIdx > 0}
+                                showChevron
+                                onPress={() => setOpenSheet('prepTime')}
+                            />
+                        </>
+                    ) : (
+                        <FilterChip
+                            label={diet ?? 'Diet'}
+                            selected={!!diet}
+                            showChevron
+                            onPress={() => setOpenSheet('diet')}
+                        />
+                    )}
                 </View>
 
                 {/* Results header */}
@@ -399,7 +423,7 @@ export default function FoodSearch() {
                     <Text style={styles.resultsCount}>
                         {submittedQuery
                             ? `${total} results for “${submittedQuery}”`
-                            : `${total} ${isRecipes ? 'recipes' : 'foods'}`}
+                            : `${total} ${noun}`}
                     </Text>
                     {isRecipes && (
                         <Pressable
@@ -431,8 +455,7 @@ export default function FoodSearch() {
                 ) : count === 0 ? (
                     <View style={styles.centerBox}>
                         <Text style={styles.emptyText}>
-                            No {isRecipes ? 'recipes' : 'foods'} found. Try a
-                            different search.
+                            No {noun} found. Try a different search.
                         </Text>
                     </View>
                 ) : (
@@ -459,7 +482,7 @@ export default function FoodSearch() {
                                     <ActivityIndicator color={colors.primary} />
                                 ) : (
                                     <Text style={styles.viewMoreText}>
-                                        View more {isRecipes ? 'recipes' : 'foods'} ↓
+                                        View more {noun} ↓
                                     </Text>
                                 )}
                             </Pressable>
@@ -504,6 +527,14 @@ export default function FoodSearch() {
                 options={RECIPE_SORTS.map((s, i) => ({ label: s.label, value: i }))}
                 selected={sortIdx}
                 onSelect={setSortIdx}
+                onClose={() => setOpenSheet(null)}
+            />
+            <OptionsSheet<string | null>
+                visible={openSheet === 'diet'}
+                title="Diet"
+                options={DIET_OPTIONS}
+                selected={diet}
+                onSelect={setDiet}
                 onClose={() => setOpenSheet(null)}
             />
         </SafeAreaView>
