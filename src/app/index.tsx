@@ -1,5 +1,6 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import AuthPreview from '@/components/auth/auth-preview';
@@ -39,6 +40,17 @@ export default function WelcomeScreen() {
 
           {/* This existing component owns sessions and opens the full-screen forms. */}
           <AuthPreview onSignedInChange={setSignedIn} />
+
+          {/* Keep main's intake entry point available after authentication. */}
+          {signedIn && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/profile-intake')}
+              style={({ pressed }) => [styles.profileButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.profileButtonText}>Set up my profile</Text>
+            </Pressable>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -46,6 +58,19 @@ export default function WelcomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  profileButton: {
+    marginTop: 16,
+    minHeight: 52,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#315C42',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileButtonText: { color: '#315C42', fontSize: 16, fontWeight: '700' },
+  pressed: { opacity: 0.75 },
   flex: { flex: 1 },
   page: { flex: 1, backgroundColor: '#F7F5EB' },
   scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingTop: 12, paddingBottom: BottomTabInset + 16 },
