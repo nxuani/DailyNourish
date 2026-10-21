@@ -14,6 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Brand colors + type scale — the single source of truth for styling.
 import { colors, fontSize } from '@/theme/tokens';
+import { matchFoodIcon } from '@/lib/foodIcon';
+import {
+    BASE_INGREDIENTS,
+    INGREDIENT_CATEGORIES,
+    ingredientIcon,
+} from '@/lib/baseIngredients';
 import {
     getRecipeTypes,
     searchFoods,
@@ -27,8 +33,9 @@ const TABS: Tab[] = ['All foods', 'Recipes', 'Ingredients'];
 
 // Empty = browse. Recipes browse freely with no term; FatSecret's FOOD search
 // needs a term, so the food tabs fall back to this seed when the box is empty.
+// (Temporary default until we have real popular-foods data.)
 const DEFAULT_QUERY = '';
-const FOOD_BROWSE_SEED = 'chicken';
+const FOOD_BROWSE_SEED = 'cake';
 
 // Prep-time presets. `to` is an upper bound in minutes.
 const PREP_OPTIONS: { label: string; to?: number }[] = [
@@ -43,6 +50,13 @@ const RECIPE_SORTS: { label: string; value: string }[] = [
     { label: 'Newest', value: 'newest' },
     { label: 'Fewest cal', value: 'caloriesPerServingAscending' },
     { label: 'Most cal', value: 'caloriesPerServingDescending' },
+];
+
+// Food sort options (applied client-side to the loaded results).
+const FOOD_SORTS: { label: string }[] = [
+    { label: 'Relevance' },
+    { label: 'Fewest cal' },
+    { label: 'Most protein' },
 ];
 
 // Dietary preferences — FatSecret's full list is just these two.
@@ -159,56 +173,67 @@ function OptionsSheet<T>({
     );
 }
 
-// Shared card shell (image + title + meta + tag).
+// Shared card shell (API photo when available, icon fallback, + text).
 function ResultCard({
     image,
-    placeholder,
+    icon,
     title,
     meta,
     subMeta,
     tag,
 }: {
     image: string | null;
-    placeholder: string;
+    icon: string;
     title: string;
-    meta: string;
+    meta?: string;
     subMeta?: string | null;
     tag?: string | null;
 }) {
-    // Fall back to the placeholder if the image URL fails to load (dead/blocked).
     const [imgFailed, setImgFailed] = useState(false);
     const showImage = !!image && !imgFailed;
+    const metaLine = [meta, subMeta].filter(Boolean).join(' • ');
     return (
         <Pressable
-            style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             accessibilityRole="button"
         >
-            <View style={styles.cardImage}>
+            <View style={styles.rowIcon}>
                 {showImage ? (
                     <Image
                         source={{ uri: image }}
-                        style={styles.cardImageFill}
+                        style={styles.rowIconFill}
                         contentFit="cover"
                         transition={150}
                         onError={() => setImgFailed(true)}
                     />
                 ) : (
-                    <Text style={styles.cardImageEmoji}>{placeholder}</Text>
+                    <Text style={styles.rowIconEmoji}>{icon}</Text>
                 )}
             </View>
-
-            <Text style={styles.cardTitle} numberOfLines={2}>
-                {title}
-            </Text>
-
-            <Text style={styles.cardMeta}>{meta}</Text>
-            {subMeta ? <Text style={styles.cardMeta}>{subMeta}</Text> : null}
-            {tag ? (
-                <Text style={styles.cardTag} numberOfLines={1}>
-                    {tag}
+            <View style={styles.rowText}>
+                <Text style={styles.rowTitle} numberOfLines={1}>
+                    {title}
                 </Text>
-            ) : null}
+                {metaLine ? (
+                    <Text style={styles.rowMeta} numberOfLines={1}>
+                        {metaLine}
+                    </Text>
+                ) : null}
+                {tag ? (
+                    <Text style={styles.rowTag} numberOfLines={1}>
+                        {tag}
+                    </Text>
+                ) : null}
+            </View>
         </Pressable>
+    );
+}
+
+// Icon from the name, falling back to the item's FatSecret categories/types,
+// then a generic icon — so branded items without a name match still get one.
+function iconFor(name: string, categories: string[]): string {
+    return (
+        matchFoodIcon(name) ?? matchFoodIcon(categories.join(' ')) ?? '🍽️'
     );
 }
 
@@ -216,7 +241,7 @@ function FoodCard({ item }: { item: FoodSearchItem }) {
     return (
         <ResultCard
             image={item.image}
-            placeholder="🍽️"
+            icon={iconFor(item.name, item.subCategories)}
             title={item.name}
             meta={`${fmt(item.calories)} cal • ${fmt(item.protein)} g protein`}
             subMeta={item.serving ? `Per ${item.serving}` : null}
@@ -229,7 +254,7 @@ function RecipeCard({ item }: { item: RecipeItem }) {
     return (
         <ResultCard
             image={item.image}
-            placeholder="🍲"
+            icon={iconFor(item.name, item.types)}
             title={item.name}
             meta={`${fmt(item.calories)} cal • ${fmt(item.protein)} g protein`}
             tag={item.types[0] || null}
@@ -256,15 +281,17 @@ export default function FoodSearch() {
     const [prepIdx, setPrepIdx] = useState(0);
     const [sortIdx, setSortIdx] = useState(0);
 
-    // Food-tab filter.
+    // Food-tab filters.
     const [diet, setDiet] = useState<string | null>(null);
+    const [foodSortIdx, setFoodSortIdx] = useState(0);
 
     // Which filter dropdown sheet is open (null = none).
     const [openSheet, setOpenSheet] = useState<
-        'mealType' | 'prepTime' | 'sort' | 'diet' | null
+        'mealType' | 'prepTime' | 'sort' | 'diet' | 'foodSort' | null
     >(null);
 
     const isRecipes = activeTab === 'Recipes';
+    const isIngredients = activeTab === 'Ingredients';
 
     // Fetch the meal-type options once (for the Recipes filter).
     useEffect(() => {
@@ -275,6 +302,11 @@ export default function FoodSearch() {
 
     const runSearch = useCallback(
         async (pageToLoad: number, append: boolean) => {
+            // Ingredients tab uses the local curated catalog, not the API.
+            if (activeTab === 'Ingredients') {
+                setLoading(false);
+                return;
+            }
             const q = submittedQuery.trim(); // '' = browse (handled by the proxy)
             if (append) setLoadingMore(true);
             else setLoading(true);
@@ -294,12 +326,9 @@ export default function FoodSearch() {
                     setTotal(data.total);
                     setPage(data.page);
                 } else {
-                    // Food search needs a term — seed it when browsing empty.
-                    // Ingredients tab = generic (non-branded) foods only.
+                    // All foods: food search needs a term — seed when empty.
                     const data = await searchFoods(q || FOOD_BROWSE_SEED, {
                         page: pageToLoad,
-                        foodType:
-                            activeTab === 'Ingredients' ? 'generic' : undefined,
                     });
                     setFoods((prev) =>
                         append ? [...prev, ...data.results] : data.results
@@ -328,12 +357,40 @@ export default function FoodSearch() {
         runSearch(0, false);
     }, [runSearch]);
 
-    const count = isRecipes ? recipes.length : foods.length;
-    const canLoadMore = count > 0 && count < total;
+    // Diet filter + sort, applied client-side on the loaded food results.
+    const foodsShown = (() => {
+        let list =
+            !isRecipes && diet
+                ? foods.filter((f) => f.diets.includes(diet))
+                : foods;
+        if (!isRecipes && foodSortIdx > 0) {
+            list = [...list].sort((a, b) =>
+                foodSortIdx === 1
+                    ? (a.calories ?? Infinity) - (b.calories ?? Infinity) // fewest cal
+                    : (b.protein ?? -Infinity) - (a.protein ?? -Infinity) // most protein
+            );
+        }
+        return list;
+    })();
+    const loadedCount = isRecipes ? recipes.length : foods.length;
+    const shownCount = isRecipes ? recipes.length : foodsShown.length;
+    const canLoadMore = loadedCount > 0 && loadedCount < total;
+
+    // Ingredients tab: filter the curated catalog locally and group by category.
+    const ingredientQuery = query.trim().toLowerCase();
+    const filteredIngredients = ingredientQuery
+        ? BASE_INGREDIENTS.filter((i) =>
+              i.name.toLowerCase().includes(ingredientQuery)
+          )
+        : BASE_INGREDIENTS;
+    const ingredientGroups = INGREDIENT_CATEGORIES.map((category) => ({
+        category,
+        items: filteredIngredients.filter((i) => i.category === category),
+    })).filter((g) => g.items.length > 0);
 
     const noun = isRecipes
         ? 'recipes'
-        : activeTab === 'Ingredients'
+        : isIngredients
           ? 'ingredients'
           : 'foods';
     const prepLabel = prepIdx === 0 ? 'Prep time' : PREP_OPTIONS[prepIdx].label;
@@ -391,54 +448,94 @@ export default function FoodSearch() {
                     ))}
                 </View>
 
-                {/* Filters — tab-contextual (recipe filters vs food filters) */}
-                <View style={styles.chipRow}>
-                    {isRecipes ? (
-                        <>
+                {/* Filters — Recipes: meal/prep; All foods: diet; Ingredients: none */}
+                {!isIngredients && (
+                    <View style={styles.chipRow}>
+                        {isRecipes ? (
+                            <>
+                                <FilterChip
+                                    label={mealType ?? 'Meal type'}
+                                    selected={!!mealType}
+                                    showChevron
+                                    onPress={() => setOpenSheet('mealType')}
+                                />
+                                <FilterChip
+                                    label={prepLabel}
+                                    selected={prepIdx > 0}
+                                    showChevron
+                                    onPress={() => setOpenSheet('prepTime')}
+                                />
+                            </>
+                        ) : (
                             <FilterChip
-                                label={mealType ?? 'Meal type'}
-                                selected={!!mealType}
+                                label={diet ?? 'Diet'}
+                                selected={!!diet}
                                 showChevron
-                                onPress={() => setOpenSheet('mealType')}
+                                onPress={() => setOpenSheet('diet')}
                             />
-                            <FilterChip
-                                label={prepLabel}
-                                selected={prepIdx > 0}
-                                showChevron
-                                onPress={() => setOpenSheet('prepTime')}
-                            />
-                        </>
-                    ) : (
-                        <FilterChip
-                            label={diet ?? 'Diet'}
-                            selected={!!diet}
-                            showChevron
-                            onPress={() => setOpenSheet('diet')}
-                        />
-                    )}
-                </View>
+                        )}
+                    </View>
+                )}
 
                 {/* Results header */}
                 <View style={styles.resultsHeader}>
                     <Text style={styles.resultsCount}>
-                        {submittedQuery
-                            ? `${total} results for “${submittedQuery}”`
-                            : `${total} ${noun}`}
+                        {isIngredients
+                            ? `${filteredIngredients.length} ingredients`
+                            : !isRecipes && diet
+                              ? `${shownCount} ${noun} · ${diet}`
+                              : submittedQuery
+                                ? `${total} results for “${submittedQuery}”`
+                                : `${total} ${noun}`}
                     </Text>
-                    {isRecipes && (
+                    {!isIngredients && (
                         <Pressable
-                            onPress={() => setOpenSheet('sort')}
+                            onPress={() =>
+                                setOpenSheet(isRecipes ? 'sort' : 'foodSort')
+                            }
                             accessibilityRole="button"
                         >
                             <Text style={styles.sortLabel}>
-                                {RECIPE_SORTS[sortIdx].label} ⌄
+                                {isRecipes
+                                    ? RECIPE_SORTS[sortIdx].label
+                                    : FOOD_SORTS[foodSortIdx].label}{' '}
+                                ⌄
                             </Text>
                         </Pressable>
                     )}
                 </View>
 
                 {/* Results area */}
-                {loading ? (
+                {isIngredients ? (
+                    filteredIngredients.length === 0 ? (
+                        <View style={styles.centerBox}>
+                            <Text style={styles.emptyText}>
+                                No ingredients match “{query.trim()}”.
+                            </Text>
+                        </View>
+                    ) : (
+                        ingredientGroups.map((g) => (
+                            <View key={g.category}>
+                                <Text style={styles.sectionHeader}>
+                                    {g.category}
+                                </Text>
+                                <View style={styles.list}>
+                                    {g.items.map((i) => (
+                                        <ResultCard
+                                            key={i.name}
+                                            image={null}
+                                            icon={ingredientIcon(
+                                                i.name,
+                                                i.category
+                                            )}
+                                            title={i.name}
+                                        />
+                                    ))}
+                                </View>
+                            </View>
+                        ))
+                    )
+                ) : loading ? (
                     <View style={styles.centerBox}>
                         <ActivityIndicator color={colors.primary} />
                     </View>
@@ -452,20 +549,38 @@ export default function FoodSearch() {
                             <Text style={styles.retryText}>Try again</Text>
                         </Pressable>
                     </View>
-                ) : count === 0 ? (
+                ) : shownCount === 0 ? (
                     <View style={styles.centerBox}>
                         <Text style={styles.emptyText}>
-                            No {noun} found. Try a different search.
+                            {!isRecipes && diet
+                                ? `No ${noun} match “${diet}” on the loaded results.`
+                                : `No ${noun} found. Try a different search.`}
                         </Text>
+                        {!isRecipes && diet && canLoadMore && (
+                            <Pressable
+                                onPress={() =>
+                                    !loadingMore && runSearch(page + 1, true)
+                                }
+                                style={styles.retryButton}
+                            >
+                                {loadingMore ? (
+                                    <ActivityIndicator color={colors.primary} />
+                                ) : (
+                                    <Text style={styles.retryText}>
+                                        Load more
+                                    </Text>
+                                )}
+                            </Pressable>
+                        )}
                     </View>
                 ) : (
                     <>
-                        <View style={styles.grid}>
+                        <View style={styles.list}>
                             {isRecipes
                                 ? recipes.map((item) => (
                                       <RecipeCard key={item.id} item={item} />
                                   ))
-                                : foods.map((item) => (
+                                : foodsShown.map((item) => (
                                       <FoodCard key={item.id} item={item} />
                                   ))}
                         </View>
@@ -482,7 +597,7 @@ export default function FoodSearch() {
                                     <ActivityIndicator color={colors.primary} />
                                 ) : (
                                     <Text style={styles.viewMoreText}>
-                                        View more {noun} ↓
+                                        Load more {noun} ↓
                                     </Text>
                                 )}
                             </Pressable>
@@ -535,6 +650,14 @@ export default function FoodSearch() {
                 options={DIET_OPTIONS}
                 selected={diet}
                 onSelect={setDiet}
+                onClose={() => setOpenSheet(null)}
+            />
+            <OptionsSheet<number>
+                visible={openSheet === 'foodSort'}
+                title="Sort by"
+                options={FOOD_SORTS.map((s, i) => ({ label: s.label, value: i }))}
+                selected={foodSortIdx}
+                onSelect={setFoodSortIdx}
                 onClose={() => setOpenSheet(null)}
             />
         </SafeAreaView>
@@ -698,61 +821,70 @@ const styles = StyleSheet.create({
         color: colors.primary,
     },
 
-    // Results grid
-    grid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'space-between',
-        rowGap: 16,
+    // Results list (compact rows)
+    list: {
+        gap: 10,
     },
 
-    card: {
-        width: '48%',
+    sectionHeader: {
+        fontSize: fontSize.base,
+        fontWeight: '700',
+        color: colors.heading,
+        marginTop: 18,
+        marginBottom: 8,
+    },
+
+    row: {
+        flexDirection: 'row',
+        alignItems: 'center',
         backgroundColor: colors.surface,
         borderWidth: 1,
         borderColor: colors.border,
-        borderRadius: 14,
+        borderRadius: 12,
         padding: 10,
+        gap: 12,
     },
 
-    cardImage: {
-        height: 92,
+    rowIcon: {
+        width: 48,
+        height: 48,
         borderRadius: 10,
         backgroundColor: colors.foodBackdrop,
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 10,
         overflow: 'hidden',
     },
 
-    cardImageFill: {
+    rowIconFill: {
         width: '100%',
         height: '100%',
     },
 
-    cardImageEmoji: {
-        fontSize: 40,
+    rowIconEmoji: {
+        fontSize: 24,
     },
 
-    cardTitle: {
+    rowText: {
+        flex: 1,
+    },
+
+    rowTitle: {
         fontSize: fontSize.md,
         fontWeight: '700',
         color: colors.heading,
-        lineHeight: 18,
-        marginBottom: 6,
     },
 
-    cardMeta: {
+    rowMeta: {
         fontSize: fontSize.xs,
         color: colors.textMuted,
         marginTop: 2,
     },
 
-    cardTag: {
+    rowTag: {
         fontSize: fontSize.xs,
         fontWeight: '600',
         color: colors.primary,
-        marginTop: 8,
+        marginTop: 3,
     },
 
     // View more

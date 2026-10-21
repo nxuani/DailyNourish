@@ -53,6 +53,9 @@ export type FoodSearchItem = {
     protein: number | null;
     fat: number | null;
     carbs: number | null;
+    diets: string[]; // dietary preferences present, e.g. ["Vegan","Vegetarian"]
+    allergens: string[]; // allergens present, e.g. ["Soy"]
+    subCategories: string[]; // food categories, e.g. ["Cakes"] (icon fallback)
 };
 
 export type FoodSearchResponse = {
