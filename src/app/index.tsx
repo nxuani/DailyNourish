@@ -1,98 +1,83 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import { router } from 'expo-router';
+import { useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import AuthPreview from '@/components/auth/auth-preview';
+import { BottomTabInset } from '@/constants/theme';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+// This route is now the welcome page. The future signed-in Home is a separate task.
+export default function WelcomeScreen() {
+  const [signedIn, setSignedIn] = useState(false);
+  const { width, height } = useWindowDimensions();
+  // Give the image explicit display dimensions so its 1398x1125 source size
+  // cannot stretch the page. Use a smaller logo on shorter phones.
+  const logoWidth = Math.max(80, Math.min(width - 48, height < 700 ? 180 : 240));
+  const logoHeight = logoWidth * (1125 / 1398);
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
-
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+    <SafeAreaView style={styles.page}>
+      {/* Scrolling accommodates small phones and larger accessibility text. */}
+      <ScrollView style={styles.flex} contentContainerStyle={styles.scroll}>
+        <View style={styles.content}>
+          {/* Size the transparent logo explicitly while keeping its proportions. */}
+          <Image
+            source={require('@/assets/images/daily-nourish-logo.png')}
+            accessibilityLabel="Daily Nourish logo"
+            style={[styles.logo, { width: logoWidth, height: logoHeight }]}
+            resizeMode="contain"
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+          <View style={styles.hero}>
+            <Text accessibilityRole="header" style={styles.heading}>
+              {signedIn ? 'You’re signed in.' : 'Small steps.\nHealthier days.'}
+            </Text>
+            <Text style={styles.description}>
+              {signedIn
+                ? 'Your Daily Nourish home is coming soon.'
+                : 'Build healthier habits, one day at a time.'}
+            </Text>
+          </View>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+          {/* This existing component owns sessions and opens the full-screen forms. */}
+          <AuthPreview onSignedInChange={setSignedIn} />
+
+          {/* Keep main's intake entry point available after authentication. */}
+          {signedIn && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/profile-intake')}
+              style={({ pressed }) => [styles.profileButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.profileButtonText}>Set up my profile</Text>
+            </Pressable>
+          )}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
+  profileButton: {
+    marginTop: 16,
+    minHeight: 52,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#315C42',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
   },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
+  profileButtonText: { color: '#315C42', fontSize: 16, fontWeight: '700' },
+  pressed: { opacity: 0.75 },
+  flex: { flex: 1 },
+  page: { flex: 1, backgroundColor: '#F7F5EB' },
+  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingTop: 12, paddingBottom: BottomTabInset + 16 },
+  content: { width: '100%', maxWidth: 460, alignSelf: 'center' },
+  logo: { alignSelf: 'center' },
+  // A single centered intro aligns with the logo and authentication buttons.
+  hero: { marginTop: 8, marginBottom: 28, alignItems: 'center' },
+  heading: { color: '#243B2B', fontSize: 34, lineHeight: 40, fontWeight: '700', marginBottom: 12, textAlign: 'center' },
+  description: { color: '#58665A', fontSize: 16, lineHeight: 24, textAlign: 'center', maxWidth: 290 },
 });
