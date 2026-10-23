@@ -1,13 +1,16 @@
-import { router } from 'expo-router';
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 
+// Placeholder name. Replace with user's name later
+const userName = 'Name';
+
 export default function HomeScreen() {
   return (
+
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
 
@@ -15,9 +18,13 @@ export default function HomeScreen() {
           <ThemedText type="title" style={styles.title}>
             Daily Nourish
           </ThemedText>
+          <ThemedText type="subtitle">Hello, {userName}</ThemedText>
+          <ThemedText style={styles.description}>
+            Fuel your goals, one meal at a time.
+          </ThemedText>
         </ThemedView>
 
-        <Pressable
+        {/* <Pressable
           accessibilityRole="button"
           onPress={() => 
           {
@@ -32,7 +39,7 @@ export default function HomeScreen() {
           <ThemedText style={styles.buttonText}>
             Set up my profile
           </ThemedText>
-        </Pressable>
+        </Pressable> */}
       </SafeAreaView>
     </ThemedView>
   );

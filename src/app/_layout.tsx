@@ -6,29 +6,23 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 
 SplashScreen.preventAutoHideAsync();
 
-export default function TabLayout() {
+export default function RootLayout() {
   const colorScheme = useColorScheme();
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AnimatedSplashOverlay />
 
       <Stack>
-        <Stack.Screen
-          name="index"
-          options={{ headerShown: false}}
-         />
+        {/* The five bottom tabs live in the (tabs) folder */}
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
 
-         <Stack.Screen
+        {/* Screens that open on top of the tabs (with a back button) */}
+        <Stack.Screen
           name="profile-intake"
           options={{
             title: 'Your Profile',
             headerBackTitle: 'Home',
           }}
-        />
-        
-        <Stack.Screen
-          name="explore"
-          options={{ title: 'Explore' }}
         />
       </Stack>
     </ThemeProvider>
