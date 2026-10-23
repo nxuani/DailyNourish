@@ -1,6 +1,7 @@
 
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/colors';
@@ -85,6 +86,19 @@ export default function HomeScreen() {
         <Text style={styles.description}>
           Fuel your goals, one meal at a time.
         </Text>
+
+        <Pressable
+          onPress={() => router.push('/FoodSearch')}
+          accessibilityRole="button"
+          accessibilityLabel="Search foods"
+          style={({ pressed }) => [
+            styles.searchButton,
+            pressed && styles.searchButtonPressed,
+          ]}
+        >
+          <Text style={styles.searchIcon}>🔍</Text>
+          <Text style={styles.searchText}>Search foods</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -119,5 +133,29 @@ const styles = StyleSheet.create({
     marginTop: 10,
     lineHeight: 24,
     textAlign: 'center',
+  },
+  searchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 28,
+    alignSelf: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  searchButtonPressed: {
+    opacity: 0.8,
+  },
+  searchIcon: {
+    fontSize: 16,
+  },
+  searchText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.muted,
   },
 });
