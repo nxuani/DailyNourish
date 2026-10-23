@@ -1,3 +1,4 @@
+
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme } from 'react-native';
@@ -8,20 +9,30 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AnimatedSplashOverlay />
 
-      <Stack>
-        {/* The five bottom tabs live in the (tabs) folder */}
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack initialRouteName="index">
+        {/* Welcome / Login screen from main */}
+        <Stack.Screen
+          name="index"
+          options={{ headerShown: false }}
+        />
 
-        {/* Screens that open on top of the tabs (with a back button) */}
+        {/* Your five bottom navigation tabs */}
+        <Stack.Screen
+          name="(tabs)"
+          options={{ headerShown: false }}
+        />
+
+        {/* Profile setup screen */}
         <Stack.Screen
           name="profile-intake"
           options={{
             title: 'Your Profile',
-            headerBackTitle: 'Home',
+            headerBackTitle: 'Back',
           }}
         />
       </Stack>
