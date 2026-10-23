@@ -372,7 +372,7 @@ export default function ProfileIntakeScreen()
                 [
                     {
                         text: 'Continue',
-                        onPress: () => router.replace('/'),
+                        onPress: () => router.replace('/(tabs)'),
                     },
                 ]
             );
