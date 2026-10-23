@@ -1,11 +1,21 @@
 export const colors = {
-  primary: '#2C6650',
-  ink: '#1F3D33',
-  background: '#FBF9F4',
+  // Main brand colors
+  primary: '#315C42',
+  primaryDark: '#243B2B',
+
+  // Text
+  ink: '#243B2B',
+  muted: '#58665A',
+
+  // Backgrounds
+  background: '#F7F5EB',
   card: '#FFFFFF',
-  border: '#E4E4DC',
-  muted: '#7C8782',
-  focusBackground: '#E9F2EA',
+  focusBackground: '#E9EDE3',
+
+  // Borders
+  border: '#B7C4B4',
+
+  // Nutrition progress colors
   greenTrack: '#DCE8E1',
   sodium: '#DB8A68',
   sodiumTrack: '#F6DDD2',

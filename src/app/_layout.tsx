@@ -1,38 +1,52 @@
-
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { colors } from '@/constants/colors';
 
 SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+const DailyNourishTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: colors.primary,
+    background: colors.background,
+    card: colors.card,
+    text: colors.ink,
+    border: colors.border,
+    notification: colors.primary,
+  },
+};
 
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={DailyNourishTheme}>
       <AnimatedSplashOverlay />
 
       <Stack initialRouteName="index">
-        {/* Welcome / Login screen from main */}
         <Stack.Screen
           name="index"
           options={{ headerShown: false }}
         />
 
-        {/* Your five bottom navigation tabs */}
         <Stack.Screen
           name="(tabs)"
           options={{ headerShown: false }}
         />
 
-        {/* Profile setup screen */}
         <Stack.Screen
           name="profile-intake"
           options={{
             title: 'Your Profile',
             headerBackTitle: 'Back',
+            headerStyle: {
+              backgroundColor: colors.background,
+            },
+            headerTintColor: colors.primary,
+            headerTitleStyle: {
+              fontWeight: '600',
+            },
           }}
         />
       </Stack>
