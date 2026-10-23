@@ -272,29 +272,28 @@ export default function ProfileIntakeScreen()
                 throw lookupError;
             }
 
-            //update existing profile instead of creating a duplicate
+            //update the existing profile, or create one if the user has none yet
             if(existingProfile)
             {
                 const { error: updateError } = await supabase
                   .from('users')
                   .update(profileData)
                   .eq('auth_id', user.id);
-                
+
                 if(updateError)
                 {
-                    throw updateError
+                    throw updateError;
                 }
-                else
+            }
+            else
+            {
+                const { error: insertError } = await supabase
+                  .from('users')
+                  .insert(profileData);
+
+                if(insertError)
                 {
-                    //create profile when user doesn't have one yet
-                    const { error: insertError } = await supabase
-                      .from('users')
-                      .insert(profileData);
-                    
-                    if(insertError)
-                    {
-                        throw insertError;
-                    }
+                    throw insertError;
                 }
             }
             //save selected goal only when user chose one
