@@ -56,22 +56,70 @@ Instructions for getting the app running on your own computer:
 ## Structure
 A quick look at how the project is organized:
 
-```
+```text
 /src
-  /app           # the app's screens — see note below
-  /components    # smaller reusable pieces used across screens
-  /constants     # shared values used across the app
-  /hooks         # custom reusable logic (not UI)
-  global.css     # shared app-wide styling
+  /app
+    _layout.tsx             # Root navigation
+    index.tsx               # Welcome/Login screen
+    profile-intake.tsx      # User profile questionnaire
 
-/docs            # research notes, planning docs, and other write-ups
+    /(tabs)
+      _layout.tsx           # Bottom tab navigation
+      index.tsx             # Home screen
+      plan.tsx              # Weekly meal plan
+      pantry.tsx            # Pantry management
+      meal-log.tsx          # Food and nutrition logging
+      profile.tsx           # User profile
+
+  /components
+    /auth
+      auth-preview.tsx      # Login/signup component
+    placeholder-screen.tsx  # Reusable placeholder for unfinished screens
+    themed-text.tsx         # Reusable themed text
+    themed-view.tsx         # Reusable themed views
+
+  /constants
+    colors.ts               # Shared app color palette
+    theme.ts                # Shared theme and spacing values
+
+  /hooks                    # Custom reusable hooks
+
+  /lib
+    supabase.ts             # Supabase client configuration
+
+  global.css                # Shared app-wide styling
+
+/docs                       # Research, planning, and documentation
 ```
-**About `/app`:** every file inside this folder automatically becomes a screen in the app — so instead of a separate "screens" folder and a separate file wiring up navigation, the two are combined here. For example:
-- `index.tsx` → the Home screen
-- `explore.tsx` → a second screen/tab
-- `_layout.tsx` → controls the tab bar and overall navigation
 
-To add a new screen (like Food Search), add a new file here (e.g. `food-search.tsx`) and connect it in `_layout.tsx`.
+**About `/app`:**
+
+Daily Nourish uses Expo Router, which means files inside the `app` folder define the application's screens and navigation.
+
+- `index.tsx` — Welcome/Login screen.
+- `profile-intake.tsx` — Collects user information, nutrition goals, allergies, and dietary preferences.
+- `_layout.tsx` — Controls navigation between the Welcome screen, Profile Intake, and main application.
+- `(tabs)/` — Contains the five main navigation tabs.
+
+**Main Navigation Tabs:**
+
+| Tab | File | Purpose |
+|---|---|---|
+| Home | `(tabs)/index.tsx` | Home screen and personalized greeting |
+| Plan | `(tabs)/plan.tsx` | Weekly meal planning |
+| Pantry | `(tabs)/pantry.tsx` | Pantry and ingredient management |
+| Meal Log | `(tabs)/meal-log.tsx` | Food and nutrition tracking |
+| Profile | `(tabs)/profile.tsx` | User profile and preferences |
+
+The bottom navigation bar is configured in `(tabs)/_layout.tsx`.
+
+**Important Notes for Development:**
+
+- Some tabs currently use `placeholder-screen.tsx` until their features are implemented. Replace the placeholder in your assigned screen when developing that feature.
+- Use the shared colors in `constants/colors.ts` to keep the app's cream-and-green theme consistent.
+- `constants/theme.ts` contains additional shared styling values.
+- Reusable UI components should be placed in `components/` instead of duplicating code across screens.
+- When adding a new screen, create a `.tsx` file in the appropriate Expo Router folder. Only add it to `(tabs)/_layout.tsx` if it should appear in the bottom navigation.
 
 ## Branching Guidelines
 To keep things organized while multiple people are working on the app at once:
