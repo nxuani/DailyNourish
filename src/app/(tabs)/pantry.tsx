@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,96 +13,84 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { foodIcon } from '@/lib/foodIcon';
+import { type PantryType } from '@/lib/pantry';
+import {
+  expirationStatus,
+  loadPantryDisplay,
+  type PantryDisplayItem,
+} from '@/lib/pantry-display';
 import { colors, fontSize } from '@/theme/tokens';
-
-// Match the item_type values added to Supabase.
-type PantryType = 'ingredient' | 'prepared_meal';
-
-type PreviewItem = {
-  id: string;
-  name: string;
-  quantity: string;
-  itemType: PantryType;
-  expirationLabel: string;
-  expiresSoon?: boolean;
-};
 
 const TABS: { value: PantryType; label: string }[] = [
   { value: 'ingredient', label: 'Ingredients' },
   { value: 'prepared_meal', label: 'Meals & Leftovers' },
 ];
 
-// Temporary display examples only.
-// Nothing here is fetched from or written to Supabase.
-// Real expiration labels will be calculated from saved dates later.
-const SAMPLE_ITEMS: PreviewItem[] = [
-  {
-    id: 'sample-eggs',
-    name: 'Eggs',
-    quantity: '6 pieces',
-    itemType: 'ingredient',
-    expirationLabel: 'Expires in 7 days',
-  },
-  {
-    id: 'sample-bread',
-    name: 'Whole Wheat Bread',
-    quantity: '8 slices',
-    itemType: 'ingredient',
-    expirationLabel: 'Expires in 4 days',
-  },
-  {
-    id: 'sample-spinach',
-    name: 'Spinach',
-    quantity: '1 bag',
-    itemType: 'ingredient',
-    expirationLabel: 'Expires in 3 days',
-    expiresSoon: true,
-  },
-  {
-    id: 'sample-chicken',
-    name: 'Chicken Breast',
-    quantity: '2 pieces',
-    itemType: 'ingredient',
-    expirationLabel: 'No expiration set',
-  },
-  {
-    id: 'sample-pasta',
-    name: 'Cooked Pasta',
-    quantity: '2 servings',
-    itemType: 'prepared_meal',
-    expirationLabel: 'Expires in 2 days',
-    expiresSoon: true,
-  },
-  {
-    id: 'sample-soup',
-    name: 'Vegetable Soup',
-    quantity: '3 cups',
-    itemType: 'prepared_meal',
-    expirationLabel: 'Expires tomorrow',
-    expiresSoon: true,
-  },
-  {
-    id: 'sample-rice',
-    name: 'Cooked Brown Rice',
-    quantity: '1 serving',
-    itemType: 'prepared_meal',
-    expirationLabel: 'No expiration set',
-  },
-];
-
 export default function PantryScreen() {
   const [activeTab, setActiveTab] = useState<PantryType>('ingredient');
   const [query, setQuery] = useState('');
+  const [items, setItems] = useState<PantryDisplayItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadCount, setReloadCount] = useState(0);
+
+  // Reload when returning to Pantry.
+  // Ignore late results if the user has left the screen.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      setLoading(true);
+      setError(null);
+      setItems([]);
+
+      async function load() {
+        try {
+          const result = await loadPantryDisplay();
+          if (active) setItems(result);
+        } catch (cause: unknown) {
+          if (!active) return;
+
+          const message =
+            typeof cause === 'object' &&
+            cause !== null &&
+            'message' in cause &&
+            typeof cause.message === 'string'
+              ? cause.message
+              : 'Unable to load your pantry. Please try again.';
+
+          setError(message);
+        } finally {
+          if (active) setLoading(false);
+        }
+      }
+
+      void load();
+
+      return () => {
+        active = false;
+      };
+    }, [reloadCount])
+  );
 
   const isIngredients = activeTab === 'ingredient';
   const searchTerm = query.trim().toLowerCase();
+  const tabItems = items.filter((item) => item.item_type === activeTab);
 
-  // Search only the items belonging to the selected pantry tab.
-  const visibleItems = SAMPLE_ITEMS.filter(
+  const visibleItems = tabItems.filter(
     (item) =>
-      item.itemType === activeTab &&
+      // Keep unresolved items visible so search doesn't hide a lookup failure.
+      item.detailsUnavailable ||
       item.name.toLowerCase().includes(searchTerm)
   );
+
+  const hasUnavailableDetails = items.some(
+    (item) => item.detailsUnavailable
+  );
+
+  function reload() {
+    setReloadCount((count) => count + 1);
+  }
 
   return (
     <SafeAreaView style={styles.page} edges={['top']}>
@@ -117,7 +106,6 @@ export default function PantryScreen() {
           Keep track of what you have on hand.
         </Text>
 
-        {/* This searches the saved pantry list, not FatSecret. */}
         <View style={styles.searchBar}>
           <Ionicons
             name="search-outline"
@@ -151,7 +139,6 @@ export default function PantryScreen() {
           )}
         </View>
 
-        {/* Wrapping text accommodates larger accessibility font sizes. */}
         <View style={styles.tabs}>
           {TABS.map((tab) => {
             const selected = activeTab === tab.value;
@@ -162,10 +149,7 @@ export default function PantryScreen() {
                 onPress={() => setActiveTab(tab.value)}
                 accessibilityRole="tab"
                 accessibilityState={{ selected }}
-                style={[
-                  styles.tab,
-                  selected && styles.selectedTab,
-                ]}
+                style={[styles.tab, selected && styles.selectedTab]}
               >
                 <Text
                   style={[
@@ -183,74 +167,127 @@ export default function PantryScreen() {
         <Text accessibilityRole="header" style={styles.sectionTitle}>
           {isIngredients ? 'Ready to cook' : 'Ready to eat'}
         </Text>
-        <Text style={styles.sectionDescription}>
+        <Text style={styles.subtitle}>
           {isIngredients
             ? 'Ingredients for your next meal.'
             : 'Prepared meals and saved portions.'}
         </Text>
 
-        {/* Keep preview data clearly distinguishable from real inventory. */}
-        <View style={styles.previewBanner}>
-          <Text style={styles.previewText}>
-            Preview: sample items only. Adding and saving are not connected yet.
-          </Text>
-        </View>
-
-        <View style={styles.list}>
-          {visibleItems.map((item) => {
-            const expirationColor = item.expiresSoon
-              ? colors.warning
-              : colors.textMuted;
-
-            return (
-              <View key={item.id} style={styles.card}>
-                <View style={styles.iconBox}>
-                  <Text
-                    style={styles.foodEmoji}
-                    accessible={false}
-                  >
-                    {foodIcon(item.name)}
-                  </Text>
-                </View>
-
-                <View style={styles.cardContent}>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.quantity}>{item.quantity}</Text>
-
-                  <View style={styles.expirationRow}>
-                    <View
-                      style={[
-                        styles.statusDot,
-                        { backgroundColor: expirationColor },
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.expirationText,
-                        { color: expirationColor },
-                      ]}
-                    >
-                      {item.expirationLabel}
-                    </Text>
-                  </View>
-                </View>
+        {loading ? (
+          <View style={styles.messageBox}>
+            <ActivityIndicator
+              color={colors.primary}
+              accessibilityLabel="Loading pantry"
+            />
+            <Text style={styles.messageText}>Loading your pantry...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.messageBox}>
+            <Text style={styles.messageTitle}>Could not load pantry</Text>
+            <Text style={styles.messageText}>{error}</Text>
+            <Pressable
+              onPress={reload}
+              accessibilityRole="button"
+              style={styles.retryButton}
+            >
+              <Text style={styles.retryText}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            {hasUnavailableDetails && (
+              <View style={styles.notice}>
+                <Text style={styles.messageText}>
+                  Some food names could not be loaded. Your saved amounts
+                  and dates are still shown.
+                </Text>
+                <Pressable
+                  onPress={reload}
+                  accessibilityRole="button"
+                  style={styles.retryButton}
+                >
+                  <Text style={styles.retryText}>Retry food details</Text>
+                </Pressable>
               </View>
-            );
-          })}
+            )}
 
-          {visibleItems.length === 0 && (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No matching items</Text>
-              <Text style={styles.emptyDescription}>
-                Try another search or check the other pantry tab.
+            {visibleItems.length === 0 ? (
+              <View style={styles.messageBox}>
+                <Text style={styles.messageTitle}>
+                  {tabItems.length === 0
+                    ? isIngredients
+                      ? 'No ingredients yet'
+                      : 'No meals or leftovers yet'
+                    : 'No matching items'}
+                </Text>
+                <Text style={styles.messageText}>
+                  {tabItems.length === 0
+                    ? 'Your saved foods will appear here.'
+                    : 'Try another search or clear the search field.'}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.list}>
+                {visibleItems.map((item) => {
+                  const status = expirationStatus(item.expiration_date);
+                  const statusColor = status.warning
+                    ? colors.warning
+                    : colors.textMuted;
+
+                  return (
+                    <View key={item.pantry_item_id} style={styles.card}>
+                      <View style={styles.iconBox}>
+                        <Text style={styles.foodEmoji} accessible={false}>
+                          {foodIcon(
+                            item.detailsUnavailable ? null : item.name
+                          )}
+                        </Text>
+                      </View>
+                      <View style={styles.cardContent}>
+                        <Text style={styles.itemName}>{item.name}</Text>
+                        <Text style={styles.quantity}>
+                          {item.quantity} {item.unit}
+                        </Text>
+                        <View style={styles.expirationRow}>
+                          <View
+                            style={[
+                              styles.statusDot,
+                              { backgroundColor: statusColor },
+                            ]}
+                          />
+                          <Text
+                            style={[
+                              styles.expirationText,
+                              { color: statusColor },
+                            ]}
+                          >
+                            {status.label}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Required when displaying FatSecret-provided content. */}
+            {items.some((item) => item.fatsecret_food_id !== null) && (
+              <Text
+                accessibilityRole="link"
+                onPress={() =>
+                  router.push('https://platform.fatsecret.com/')
+                }
+                style={styles.attribution}
+              >
+                Powered by fatsecret
               </Text>
-            </View>
-          )}
-        </View>
+            )}
+          </>
+        )}
       </ScrollView>
 
-      {/* Open the existing search page for now.
-          Pantry selection and saving will be connected in a later step. */}
+      {/* Browsing works now; selecting and saving comes next. */}
       <Pressable
         onPress={() => router.push('/FoodSearch')}
         accessibilityRole="button"
@@ -262,21 +299,15 @@ export default function PantryScreen() {
       >
         <Ionicons name="add" size={30} color={colors.onPrimary} />
       </Pressable>
-
-      {/* The existing tabs layout already provides bottom navigation. */}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  page: { flex: 1, backgroundColor: colors.background },
   content: {
     paddingHorizontal: 24,
     paddingTop: 20,
-    // Keep the last card clear of the floating add button.
     paddingBottom: 110,
   },
   title: {
@@ -332,44 +363,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  selectedTab: {
-    backgroundColor: colors.primary,
-  },
+  selectedTab: { backgroundColor: colors.primary },
   tabText: {
     textAlign: 'center',
     fontSize: fontSize.base,
     fontWeight: '600',
     color: colors.textMuted,
   },
-  selectedTabText: {
-    color: colors.onPrimary,
-  },
+  selectedTabText: { color: colors.onPrimary },
   sectionTitle: {
     marginTop: 24,
     fontSize: fontSize.lg,
     fontWeight: '700',
     color: colors.heading,
   },
-  sectionDescription: {
-    marginTop: 5,
-    fontSize: fontSize.base,
-    color: colors.textMuted,
-  },
-  previewBanner: {
-    marginTop: 16,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceSoft,
-  },
-  previewText: {
-    fontSize: fontSize.sm,
-    color: colors.text,
-    lineHeight: 18,
-  },
-  list: {
-    marginTop: 16,
-    gap: 14,
-  },
+  list: { marginTop: 20, gap: 14 },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -389,13 +397,8 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     backgroundColor: colors.surfaceSoftAlt,
   },
-  foodEmoji: {
-    fontSize: 32,
-  },
-  cardContent: {
-    flex: 1,
-    minWidth: 0,
-  },
+  foodEmoji: { fontSize: 32 },
+  cardContent: { flex: 1, minWidth: 0 },
   itemName: {
     fontSize: 17,
     fontWeight: '700',
@@ -412,29 +415,45 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 6,
   },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  expirationText: {
-    flex: 1,
-    fontSize: fontSize.sm,
-  },
-  emptyState: {
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  expirationText: { flex: 1, fontSize: fontSize.sm },
+  messageBox: {
     paddingVertical: 36,
     alignItems: 'center',
+    gap: 10,
   },
-  emptyTitle: {
+  messageTitle: {
     fontSize: fontSize.md,
     fontWeight: '600',
     color: colors.heading,
-  },
-  emptyDescription: {
-    marginTop: 8,
     textAlign: 'center',
+  },
+  messageText: {
     fontSize: fontSize.base,
     color: colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  notice: {
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceSoft,
+    alignItems: 'center',
+  },
+  retryButton: {
+    minHeight: 44,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  retryText: { color: colors.primary, fontWeight: '700' },
+  attribution: {
+    marginTop: 24,
+    paddingVertical: 12,
+    color: colors.primary,
+    textAlign: 'center',
+    textDecorationLine: 'underline',
+    fontSize: fontSize.sm,
   },
   addButton: {
     position: 'absolute',
@@ -447,7 +466,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.primary,
   },
-  pressed: {
-    opacity: 0.75,
-  },
+  pressed: { opacity: 0.75 },
 });

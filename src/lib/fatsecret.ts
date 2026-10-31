@@ -140,3 +140,19 @@ export async function getRecipeTypes(): Promise<string[]> {
     const data = await proxyGet<{ types: string[] }>('/recipe-types', {});
     return data.types ?? [];
 }
+
+// Retrieve a saved pantry food through our proxy.
+// This requires the new /food route on the deployed proxy.
+export async function getFoodById(id: string): Promise<FoodSearchItem> {
+    if (!/^[0-9]+$/.test(id)) {
+        throw new Error('Invalid food ID.');
+    }
+
+    const food = await proxyGet<FoodSearchItem>('/food', { id });
+
+    if (String(food.id) !== id || typeof food.name !== 'string') {
+        throw new Error('Unexpected food details returned.');
+    }
+
+    return food;
+}
