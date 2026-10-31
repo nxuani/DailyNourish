@@ -38,15 +38,7 @@ export default function RootLayout() {
         <Stack.Screen
           name="profile-intake"
           options={{
-            title: 'Your Profile',
-            headerBackTitle: 'Back',
-            headerStyle: {
-              backgroundColor: colors.background,
-            },
-            headerTintColor: colors.primary,
-            headerTitleStyle: {
-              fontWeight: '600',
-            },
+            headerShown: false,
           }}
         />
       </Stack>
