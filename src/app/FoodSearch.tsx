@@ -1,4 +1,6 @@
+import PantryAddSheet from '@/components/pantry-add-sheet';
 import { Image } from 'expo-image';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -13,8 +15,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Brand colors + type scale — the single source of truth for styling.
-import { colors, fontSize } from '@/theme/tokens';
-import { matchFoodIcon } from '@/lib/foodIcon';
 import {
     BASE_INGREDIENTS,
     INGREDIENT_CATEGORIES,
@@ -27,6 +27,8 @@ import {
     type FoodSearchItem,
     type RecipeItem,
 } from '@/lib/fatsecret';
+import { matchFoodIcon } from '@/lib/foodIcon';
+import { colors, fontSize } from '@/theme/tokens';
 
 type Tab = 'All foods' | 'Recipes' | 'Ingredients';
 const TABS: Tab[] = ['All foods', 'Recipes', 'Ingredients'];
@@ -181,6 +183,7 @@ function ResultCard({
     meta,
     subMeta,
     tag,
+    onPress,
 }: {
     image: string | null;
     icon: string;
@@ -188,12 +191,14 @@ function ResultCard({
     meta?: string;
     subMeta?: string | null;
     tag?: string | null;
+    onPress?: () => void;
 }) {
     const [imgFailed, setImgFailed] = useState(false);
     const showImage = !!image && !imgFailed;
     const metaLine = [meta, subMeta].filter(Boolean).join(' • ');
     return (
         <Pressable
+            onPress={onPress}
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             accessibilityRole="button"
         >
@@ -237,7 +242,15 @@ function iconFor(name: string, categories: string[]): string {
     );
 }
 
-function FoodCard({ item }: { item: FoodSearchItem }) {
+// Pantry searches can attach a selection action.
+// Other entry points retain their existing behavior.
+function FoodCard({
+    item,
+    onPress,
+}: {
+    item: FoodSearchItem;
+    onPress?: () => void;
+}) {
     return (
         <ResultCard
             image={item.image}
@@ -246,6 +259,7 @@ function FoodCard({ item }: { item: FoodSearchItem }) {
             meta={`${fmt(item.calories)} cal • ${fmt(item.protein)} g protein`}
             subMeta={item.serving ? `Per ${item.serving}` : null}
             tag={item.brand || 'Generic'}
+            onPress={onPress}
         />
     );
 }
@@ -263,6 +277,28 @@ function RecipeCard({ item }: { item: RecipeItem }) {
 }
 
 export default function FoodSearch() {
+    // Pantry entry points support selecting FatSecret foods.
+    const params = useLocalSearchParams<{
+        source?: string;
+        pantryType?: string;
+    }>();
+
+    const isPantryMode = params.source === 'pantry';
+
+    const initialPantryType =
+        params.pantryType === 'prepared_meal'
+            ? 'prepared_meal'
+            : 'ingredient';
+
+    const [selectedFood, setSelectedFood] =
+        useState<FoodSearchItem | null>(null);
+
+    // Pantry uses All foods only for this version.
+    // Normal food search keeps all three existing tabs.
+    const availableTabs: Tab[] = isPantryMode
+        ? ['All foods']
+        : TABS;
+
     const [activeTab, setActiveTab] = useState<Tab>('All foods');
     const [query, setQuery] = useState(DEFAULT_QUERY);
     const [submittedQuery, setSubmittedQuery] = useState(DEFAULT_QUERY);
@@ -438,7 +474,7 @@ export default function FoodSearch() {
 
                 {/* Tabs (each queries a different source) */}
                 <View style={styles.chipRow}>
-                    {TABS.map((tab) => (
+                    {availableTabs.map((tab) => (
                         <FilterChip
                             key={tab}
                             label={tab}
@@ -581,7 +617,18 @@ export default function FoodSearch() {
                                       <RecipeCard key={item.id} item={item} />
                                   ))
                                 : foodsShown.map((item) => (
-                                      <FoodCard key={item.id} item={item} />
+                                      <FoodCard
+                                        key={item.id}
+                                        item={item}
+                                        onPress={
+                                            isPantryMode
+                                                ? () => {
+                                                    setOpenSheet(null);
+                                                    setSelectedFood(item);
+                                                }
+                                                : undefined
+                                        }
+                                    />
                                   ))}
                         </View>
 
@@ -615,6 +662,23 @@ export default function FoodSearch() {
                     </Text>
                 </View>
             </ScrollView>
+
+            {/* Opens only after selecting a food from a pantry search. */}
+            <PantryAddSheet
+                food={selectedFood}
+                initialType={initialPantryType}
+                onClose={() => setSelectedFood(null)}
+                onSaved={() => {
+                    setSelectedFood(null);
+
+                    // Returning to Pantry triggers its focus-based reload.
+                    if (router.canGoBack()) {
+                        router.back();
+                    } else {
+                        router.replace('/(tabs)/pantry');
+                    }
+                }}
+            />
 
             {/* Filter dropdown sheets (Recipes tab) */}
             <OptionsSheet<string | null>

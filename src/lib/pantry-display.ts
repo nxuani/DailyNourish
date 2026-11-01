@@ -4,37 +4,47 @@ import { supabase } from './supabase';
 
 export type PantryDisplayItem = PantryItemRow & {
   name: string;
+  image: string | null;
   detailsUnavailable: boolean;
 };
 
-// Fetch inventory first, then resolve names from the appropriate source.
-// A failed food lookup keeps the inventory entry visible.
+type FoodDisplayDetails = {
+  name: string;
+  image: string | null;
+};
+
+// Load saved inventory and retrieve its current names and images.
+// Image URLs are held only for display, not written to Supabase.
 export async function loadPantryDisplay(): Promise<PantryDisplayItem[]> {
   const rows = await loadPantryItems();
 
-  // Deduplicate lookups within this load only.
-  // Nothing is persisted or cached between loads.
-  const names = new Map<string, Promise<string>>();
+  // Deduplicate requests within this load only.
+  const details = new Map<string, Promise<FoodDisplayDetails>>();
 
-  function findName(row: PantryItemRow): Promise<string> {
+  function findDetails(row: PantryItemRow): Promise<FoodDisplayDetails> {
     const key = row.fatsecret_food_id !== null
       ? `fatsecret:${row.fatsecret_food_id}`
       : `ingredient:${row.ingredient_id}`;
 
-    const existing = names.get(key);
+    const existing = details.get(key);
     if (existing) return existing;
 
-    const request = (async () => {
+    const request = (async (): Promise<FoodDisplayDetails> => {
       if (row.fatsecret_food_id !== null) {
         const food = await getFoodById(row.fatsecret_food_id);
-        return food.name;
+
+        return {
+          name: food.name,
+          image: food.image ?? null,
+        };
       }
 
       if (row.ingredient_id === null) {
         throw new Error('Missing food reference.');
       }
 
-      // Preserve support for existing local ingredient records.
+      // Existing local ingredients have no image column.
+      // The image component will use their related emoji.
       const { data, error } = await supabase
         .from('ingredients')
         .select('name')
@@ -47,29 +57,36 @@ export async function loadPantryDisplay(): Promise<PantryDisplayItem[]> {
         throw new Error('Ingredient name unavailable.');
       }
 
-      return data.name;
+      return {
+        name: data.name,
+        image: null,
+      };
     })();
 
-    names.set(key, request);
+    details.set(key, request);
     return request;
   }
 
   const result: PantryDisplayItem[] = [];
 
-  // Limit simultaneous lookups to four.
+  // Limit simultaneous food lookups to four.
   for (let offset = 0; offset < rows.length; offset += 4) {
     const batch = await Promise.all(
       rows.slice(offset, offset + 4).map(async (row) => {
         try {
+          const food = await findDetails(row);
+
           return {
             ...row,
-            name: await findName(row),
+            ...food,
             detailsUnavailable: false,
           };
         } catch {
+          // Keep saved quantities and dates visible when lookup fails.
           return {
             ...row,
             name: 'Food details unavailable',
+            image: null,
             detailsUnavailable: true,
           };
         }
@@ -82,8 +99,7 @@ export async function loadPantryDisplay(): Promise<PantryDisplayItem[]> {
   return result;
 }
 
-// Compare calendar dates rather than elapsed hours.
-// This avoids shifting an expiration date because of time zones or DST.
+// Compare calendar dates, avoiding time-zone and DST shifts.
 export function expirationStatus(value: string | null): {
   label: string;
   warning: boolean;

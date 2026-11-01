@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { foodIcon } from '@/lib/foodIcon';
+import PantryFoodImage from '@/components/pantry-food-image';
 import { type PantryType } from '@/lib/pantry';
 import {
   expirationStatus,
@@ -236,13 +236,10 @@ export default function PantryScreen() {
 
                   return (
                     <View key={item.pantry_item_id} style={styles.card}>
-                      <View style={styles.iconBox}>
-                        <Text style={styles.foodEmoji} accessible={false}>
-                          {foodIcon(
-                            item.detailsUnavailable ? null : item.name
-                          )}
-                        </Text>
-                      </View>
+                      <PantryFoodImage
+                        image={item.image}
+                        name={item.detailsUnavailable ? '' : item.name}
+                      />
                       <View style={styles.cardContent}>
                         <Text style={styles.itemName}>{item.name}</Text>
                         <Text style={styles.quantity}>
@@ -289,7 +286,16 @@ export default function PantryScreen() {
 
       {/* Browsing works now; selecting and saving comes next. */}
       <Pressable
-        onPress={() => router.push('/FoodSearch')}
+        onPress={() =>
+          router.push({
+            pathname: '/FoodSearch',
+            params: {
+              source: 'pantry',
+              pantryType: activeTab,
+            },
+          })
+        }
+        
         accessibilityRole="button"
         accessibilityLabel="Open food search"
         style={({ pressed }) => [
