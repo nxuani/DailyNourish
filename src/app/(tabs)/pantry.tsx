@@ -1,3 +1,4 @@
+import PantryEditSheet from '@/components/pantry-edit-sheet';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -33,6 +34,9 @@ export default function PantryScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
+
+  const [selectedItem, setSelectedItem] =
+    useState<PantryDisplayItem | null>(null);
 
   // Reload when returning to Pantry.
   // Ignore late results if the user has left the screen.
@@ -235,7 +239,16 @@ export default function PantryScreen() {
                     : colors.textMuted;
 
                   return (
-                    <View key={item.pantry_item_id} style={styles.card}>
+                    <Pressable
+                      key={item.pantry_item_id}
+                      onPress={() => setSelectedItem(item)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit ${item.name}`}
+                      style={({ pressed }) => [
+                        styles.card,
+                        pressed && styles.pressed,
+                      ]}
+                    >
                       <PantryFoodImage
                         image={item.image}
                         name={item.detailsUnavailable ? '' : item.name}
@@ -262,7 +275,7 @@ export default function PantryScreen() {
                           </Text>
                         </View>
                       </View>
-                    </View>
+                    </Pressable>
                   );
                 })}
               </View>
@@ -283,6 +296,19 @@ export default function PantryScreen() {
           </>
         )}
       </ScrollView>
+      
+      <PantryEditSheet
+        item={selectedItem}
+        onClose={() => setSelectedItem(null)}
+        onChanged={(itemType) => {
+          setSelectedItem(null);
+
+          // Show the destination tab after changing an item's category.
+          setActiveTab(itemType);
+          setQuery('');
+          reload();
+        }}
+      />
 
       {/* Browsing works now; selecting and saving comes next. */}
       <Pressable
