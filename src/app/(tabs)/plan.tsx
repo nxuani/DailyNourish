@@ -37,8 +37,8 @@ function getWeekDates(): Date[] {
 
 export default function PlanScreen() {
   const dates = useMemo(getWeekDates, []);
-  const [selected, setSelected] = useState(0); // 0 = Monday, so the mock day shows
-  const [plan, setPlan] = useState<MealPlan | null>(MOCK_PLAN);
+  const [selected, setSelected] = useState((new Date().getDay() + 6) % 7); // 0 = Monday, so the mock day shows
+  const [plan, setPlan] = useState<MealPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,10 +46,10 @@ export default function PlanScreen() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase.functions.invoke('generate-meal-plan', { body: {} });
+      const { data, error } = await supabase.functions.invoke('generate-meal-plan', { body: { days: 7 } });
       if (error) throw error;
-      console.log(JSON.stringify(data, null, 2)); // remove once the shape is confirmed
-      setPlan(data as MealPlan);
+      
+      setPlan((data as { plan: MealPlan }).plan);
     } catch (e) {
       console.log('generate-meal-plan failed:', e);
       setError('Could not generate a plan. Please try again.');
@@ -58,7 +58,7 @@ export default function PlanScreen() {
     }
   }
 
-  const meals = plan?.days[selected]?.meals ?? [];
+  const meals = plan?.days?.find((d) => d.day === selected + 1)?.meals ?? [];
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

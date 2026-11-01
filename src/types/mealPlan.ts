@@ -1,24 +1,20 @@
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
-export interface Ingredient {
-  name: string;
-  amount: string;
-}
-
 export interface Meal {
   meal_type: MealType;
   name: string;
-  calories: number;
-  protein_g: number;
-  ingredients: Ingredient[];
-  instructions: string[];
+  ingredients: string[];
+  est_calories: number;
+  est_protein_g: number;
+  est_sodium_mg: number;
 }
 
 export interface DayPlan {
-  day: string;
+  day: number; // 1 = Monday
   meals: Meal[];
 }
 
 export interface MealPlan {
   days: DayPlan[];
+  notes?: string;
 }

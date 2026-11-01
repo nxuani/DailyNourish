@@ -23,7 +23,7 @@ export default function MealCard({ meal, onPress }: Props) {
         <Text style={styles.type}>{typeLabel}</Text>
         <Text style={styles.name} numberOfLines={1}>{meal.name}</Text>
         <Text style={styles.meta}>
-          {meal.calories} calories • {meal.protein_g} g protein
+        {meal.est_calories} calories • {meal.est_protein_g} g protein
         </Text>
       </View>
       <Text style={styles.chevron}>›</Text>
