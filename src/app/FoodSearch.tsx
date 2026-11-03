@@ -1,7 +1,7 @@
 import PantryAddSheet from '@/components/pantry-add-sheet';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Modal,
@@ -22,6 +22,7 @@ import {
 } from '@/lib/baseIngredients';
 import {
     getRecipeTypes,
+    getStockImages,
     searchFoods,
     searchRecipes,
     type FoodSearchItem,
@@ -336,6 +337,24 @@ export default function FoodSearch() {
             .catch(() => {});
     }, []);
 
+    // Ingredients tab: a real photo per curated ingredient (the emoji icon
+    // stays as the fallback). The catalog is static, so fetch every image once
+    // the first time the tab is opened; the proxy caches each keyword.
+    const [ingredientImages, setIngredientImages] = useState<
+        Record<string, string | null>
+    >({});
+    const ingredientImagesLoaded = useRef(false);
+    useEffect(() => {
+        if (!isIngredients || ingredientImagesLoaded.current) return;
+        ingredientImagesLoaded.current = true;
+        getStockImages(BASE_INGREDIENTS.map((i) => i.name))
+            .then(setIngredientImages)
+            .catch(() => {
+                // Keep the emojis if the lookup fails; allow a later retry.
+                ingredientImagesLoaded.current = false;
+            });
+    }, [isIngredients]);
+
     const runSearch = useCallback(
         async (pageToLoad: number, append: boolean) => {
             // Ingredients tab uses the local curated catalog, not the API.
@@ -559,7 +578,9 @@ export default function FoodSearch() {
                                     {g.items.map((i) => (
                                         <ResultCard
                                             key={i.name}
-                                            image={null}
+                                            image={
+                                                ingredientImages[i.name] ?? null
+                                            }
                                             icon={ingredientIcon(
                                                 i.name,
                                                 i.category

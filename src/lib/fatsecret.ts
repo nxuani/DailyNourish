@@ -141,6 +141,26 @@ export async function getRecipeTypes(): Promise<string[]> {
     return data.types ?? [];
 }
 
+// Batch stock-image lookup by keyword — used to put a real photo on each
+// curated ingredient (the emoji icon stays as the fallback). Returns a map of
+// name -> image URL (or null when no photo was found). Chunks the request so a
+// large catalog stays within the proxy's per-call cap.
+export async function getStockImages(
+    names: string[]
+): Promise<Record<string, string | null>> {
+    const unique = [...new Set(names.filter(Boolean))];
+    const out: Record<string, string | null> = {};
+    const CHUNK = 40;
+    for (let i = 0; i < unique.length; i += CHUNK) {
+        const batch = unique.slice(i, i + CHUNK);
+        const data = await proxyGet<{
+            images: Record<string, string | null>;
+        }>('/images', { q: batch.join(',') });
+        Object.assign(out, data.images ?? {});
+    }
+    return out;
+}
+
 // Retrieve a saved pantry food through our proxy.
 // This requires the new /food route on the deployed proxy.
 export async function getFoodById(id: string): Promise<FoodSearchItem> {
