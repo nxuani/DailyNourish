@@ -1,19 +1,96 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import AuthPreview from '@/components/auth/auth-preview';
 import { BottomTabInset } from '@/constants/theme';
+import { supabase } from '@/lib/supabase';
 
 // This route is now the welcome page. The future signed-in Home is a separate task.
 export default function WelcomeScreen() {
   const [signedIn, setSignedIn] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const { width, height } = useWindowDimensions();
   // Give the image explicit display dimensions so its 1398x1125 source size
   // cannot stretch the page. Use a smaller logo on shorter phones.
   const logoWidth = Math.max(80, Math.min(width - 48, height < 700 ? 180 : 240));
   const logoHeight = logoWidth * (1125 / 1398);
+
+  useEffect(() => {
+    console.log('Welcome screen mounted');
+    let isMounted = true;
+    let signedOutDuringCheck = false;
+
+    //listen for authentication changes
+    const { data: { subscription }, 
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if(event === 'SIGNED_OUT')
+      {
+        signedOutDuringCheck = true;
+        setSignedIn(false);
+        setCheckingSession(false);
+      }
+    });
+
+    const checkSession = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      console.log('Welcome screen session exists:', session !== null);
+      if(!isMounted || signedOutDuringCheck)
+      {
+        return;
+      }
+
+      if(error)
+      {
+        console.error('Error checking session:', error.message);
+        setCheckingSession(false);
+        return;
+      }
+
+      if(session)
+      {
+        const { data: profile, error: profileError } = await supabase
+          .from('users')
+          .select('intake_completed')
+          .eq('auth_id', session.user.id)
+          .maybeSingle();
+
+          //don't redirect if user logged out while checking
+          if(!isMounted || signedOutDuringCheck)
+          {
+            return;
+          }
+
+          if(profileError)
+          {
+            console.error('Error checking profile:', profileError.message);
+          }
+          else if(profile?.intake_completed === true)
+          {
+            console.log('Redirecting to tabs because intake is complete');
+            router.replace('/');
+            return;
+          }
+      }
+      setCheckingSession(false);
+    };
+    checkSession();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  if(checkingSession)
+  {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#f7f5eb', justifyContent: 'center', alignItems: 'center'}}>
+        <Text>Checking session...</Text>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.page}>

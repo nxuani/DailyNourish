@@ -80,7 +80,14 @@ export default function ProfileIntakeScreen()
         }
         else
         {
-            router.back();
+            if(router.canGoBack())
+            {
+                router.back();
+            }
+            else
+            {
+                router.replace('/');
+            }
         }
     };
 
@@ -157,22 +164,22 @@ export default function ProfileIntakeScreen()
             return false;
         }
 
-        //validate goal
-        if(step === 5 && !goal.trim())
-        {
-            Alert.alert(
-                'Goal',
-                'Please enter what your goal is or choose Skip'
-            );
-            return false;
-        }
-        
         //validate meal generation on meal gen screen
-        if(step === 8 && generatingmeals.length === 0)
+        if(step === 5 && generatingmeals.length === 0)
         {
             Alert.alert(
                 'Meal generation preferences',
                 'Please select at least one option to help generate your meal plan'
+            );
+            return false;
+        }
+
+        //validate goal
+        if(step === 6 && !goal.trim())
+        {
+            Alert.alert(
+                'Goal',
+                'Please enter what your goal is or choose Skip'
             );
             return false;
         }
@@ -273,6 +280,7 @@ export default function ProfileIntakeScreen()
                 weight: weightKg,
                 activity_level: activityLevel || null,
                 restrictions: restrictions.trim() || null,
+                intake_completed: true,
             };
 
             //check whether the user already has a profile
