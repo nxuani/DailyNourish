@@ -75,8 +75,6 @@ export default function RootLayout() {
     }
   }, [isAuthLoading, session, firstSegment]);
 
-  const isSignedIn = isAuthLoading || session !== null;
-
   return (
     <ThemeProvider value={DailyNourishTheme}>
       <AnimatedSplashOverlay />

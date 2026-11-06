@@ -69,7 +69,7 @@ export default function WelcomeScreen() {
           else if(profile?.intake_completed === true)
           {
             console.log('Redirecting to tabs because intake is complete');
-            router.replace('/');
+            router.replace('/(tabs)');
             return;
           }
       }
