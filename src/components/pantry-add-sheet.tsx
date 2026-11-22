@@ -1,6 +1,11 @@
-import PantryUnitPicker, {
-  PANTRY_UNITS,
-} from '@/components/pantry-unit-picker';
+import PantryExpirationPicker from '@/components/pantry-expiration-picker';
+import PantryNutritionSummary from '@/components/pantry-nutrition-summary';
+import PantryUnitPicker from '@/components/pantry-unit-picker';
+import {
+  convertPantryQuantity,
+  pantryServingMultiplier,
+  pantryUnitOptions,
+} from '@/lib/pantry-nutrition';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -63,11 +68,13 @@ function PantryAddForm({
   onSaved: () => void;
 }) {
   const [quantity, setQuantity] = useState('1');
-  // Prepared meals start with servings.
-  // Ingredients require the user to choose a unit.
-  const [unit, setUnit] = useState(
-    initialType === 'prepared_meal' ? 'servings' : ''
-  );
+  // Both categories use the food's actual serving as the starting amount.
+  const [unit, setUnit] = useState('servings');
+  const units = pantryUnitOptions(food);
+  const amountText = quantity.trim().replace(',', '.');
+  const amount = /^\d*\.?\d+$/.test(amountText)
+    ? Number(amountText)
+    : NaN;
   const [itemType, setItemType] = useState<PantryType>(initialType);
   const [expiration, setExpiration] = useState('');
   const [saving, setSaving] = useState(false);
@@ -76,12 +83,22 @@ function PantryAddForm({
   // A ref blocks a second tap immediately, before React rerenders.
   const saveInProgress = useRef(false);
 
+  function changeUnit(next: string) {
+    const converted = convertPantryQuantity(food, amount, unit, next);
+    if (converted !== null) {
+      // Avoid long floating-point strings without snapping to a wheel value.
+      setQuantity(String(Number(converted.toPrecision(12))));
+    }
+    setUnit(next);
+    setError(null);
+  }
+
   async function save() {
     if (saveInProgress.current) return;
 
     setError(null);
     // Only accept units available in the picker.
-    if (!PANTRY_UNITS.some((option) => option.value === unit)) {
+    if (!units.some((option) => option.value === unit)) {
       setError('Choose a unit before saving.');
       return;
     }
@@ -95,16 +112,31 @@ function PantryAddForm({
       return;
     }
 
+    if (
+      !food.servingId ||
+      !/^[0-9]+$/.test(food.servingId) ||
+      /^0+$/.test(food.servingId)
+    ) {
+      setError('This food has no supported serving reference. Try another result.');
+      return;
+    }
+
+    if (pantryServingMultiplier(food, Number(amountText), unit) === null) {
+      setError('Enter a positive amount using a supported unit.');
+      return;
+    }
+
     saveInProgress.current = true;
     setSaving(true);
 
     try {
       // The helper validates positive amounts, units, and calendar dates.
-      // Only the food ID and user-entered pantry details are persisted.
+      // Only food/serving IDs and user-entered inventory details are persisted.
       await addPantryItem({
         fatsecretFoodId: String(food.id),
         quantity: Number(amountText),
         unit,
+        servingId: food.servingId,
         itemType,
         expirationDate: expiration.trim() || null,
       });
@@ -211,30 +243,24 @@ function PantryAddForm({
           <Text style={styles.label}>Unit</Text>
           <PantryUnitPicker
             value={unit}
-            onChange={setUnit}
+            onChange={changeUnit}
+            options={units}
             disabled={saving}
           />
           <Text style={styles.hint}>
-            Describe how much you have. This amount is not automatically
-            converted into nutrition values.
+            {food.serving
+              ? `1 serving = ${food.serving} ${food.name}`
+              : 'Use the serving supplied for this food.'}
           </Text>
 
+          <PantryNutritionSummary food={food} quantity={amount} unit={unit} />
+
           <Text style={styles.label}>Expiration date — optional</Text>
-          <TextInput
-            value={expiration}
-            onChangeText={setExpiration}
-            editable={!saving}
-            accessibilityLabel="Optional expiration date, YYYY-MM-DD"
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.textMuted}
-            autoCorrect={false}
-            autoCapitalize="none"
-            maxLength={10}
-            style={styles.input}
-          />
-          <Text style={styles.hint}>
-            Leave blank if unknown. Use the date on your food or container.
-          </Text>
+            <PantryExpirationPicker
+              value={expiration}
+              onChange={setExpiration}
+              disabled={saving}
+            />
 
           {error ? (
             <Text accessibilityRole="alert" style={styles.error}>

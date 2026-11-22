@@ -10,6 +10,7 @@ export type PantryItemRow = {
   pantry_id: number;
   ingredient_id: number | null;
   fatsecret_food_id: string | null;
+  fatsecret_serving_id: string | null;
   item_type: PantryType;
   quantity: number;
   unit: string;
@@ -21,6 +22,8 @@ export type PantryItemRow = {
 export type PantryItemDetails = {
   quantity: number;
   unit: string;
+  // Omitted preserves the existing serving; null explicitly clears it.
+  servingId?: string | null;
   itemType: PantryType;
   // Use a calendar date such as "2026-11-05", or null.
   expirationDate: string | null;
@@ -33,7 +36,8 @@ export type AddPantryItemInput = PantryItemDetails & {
 // Explicitly request only the columns this helper needs.
 const ITEM_COLUMNS =
   'pantry_item_id, pantry_id, ingredient_id, fatsecret_food_id, ' +
-  'item_type, quantity, unit, expiration_date, date_added, updated_at';
+  'fatsecret_serving_id, item_type, quantity, unit, ' +
+  'expiration_date, date_added, updated_at';
 
 // Resolve the signed-in account to the existing application profile.
 // Never accept a user ID from the screen as proof of ownership.
@@ -123,6 +127,20 @@ function validateDetails(input: PantryItemDetails) {
     throw new Error('Choose Ingredients or Meals & Leftovers.');
   }
 
+  const servingId =
+    input.servingId === undefined
+      ? undefined
+      : input.servingId === null
+        ? null
+        : input.servingId.trim();
+
+  if (
+    servingId !== undefined &&
+    servingId !== null &&
+    (!/^[0-9]+$/.test(servingId) || /^0+$/.test(servingId))
+  ) {
+    throw new Error('Choose a valid food serving.');
+  }
   const expirationDate = input.expirationDate;
 
   if (expirationDate !== null) {
@@ -146,6 +164,11 @@ function validateDetails(input: PantryItemDetails) {
     unit,
     item_type: input.itemType,
     expiration_date: expirationDate,
+
+    // Older forms can omit this field without clearing a saved serving.
+    ...(servingId === undefined
+      ? {}
+      : { fatsecret_serving_id: servingId }),
   };
 }
 

@@ -1,3 +1,4 @@
+import PantryExpirationPicker from '@/components/pantry-expiration-picker';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,15 +15,19 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import PantryFoodImage from '@/components/pantry-food-image';
-import PantryUnitPicker, {
-  PANTRY_UNITS,
-} from '@/components/pantry-unit-picker';
+import PantryNutritionSummary from '@/components/pantry-nutrition-summary';
+import PantryUnitPicker from '@/components/pantry-unit-picker';
 import {
   removePantryItem,
   updatePantryItem,
   type PantryType,
 } from '@/lib/pantry';
 import type { PantryDisplayItem } from '@/lib/pantry-display';
+import {
+  convertPantryQuantity,
+  pantryServingMultiplier,
+  pantryUnitOptions,
+} from '@/lib/pantry-nutrition';
 import { colors, fontSize } from '@/theme/tokens';
 
 type Props = {
@@ -56,13 +61,22 @@ function PantryEditForm({
 }) {
   const [quantity, setQuantity] = useState(String(item.quantity));
 
-  // Recognize older capitalization such as "Pieces".
-  const [unit, setUnit] = useState(
-    PANTRY_UNITS.find(
-      (option) =>
-        option.value.toLowerCase() === item.unit.trim().toLowerCase()
-    )?.value ?? ''
+  const food = item.food;
+  const [servingConfirmed, setServingConfirmed] = useState(
+    Boolean(item.fatsecret_serving_id &&
+      food?.servingId === item.fatsecret_serving_id)
   );
+  const [unit, setUnit] = useState(item.unit);
+  const supportedUnits = pantryUnitOptions(food);
+  // Unresolved or older entries can still retain their original inventory unit.
+  const units = servingConfirmed
+    ? supportedUnits
+    : [{ value: item.unit, label: `${item.unit} (saved unit)` }];
+  const amountText = quantity.trim().replace(',', '.');
+  const amount = /^\d*\.?\d+$/.test(amountText) ? Number(amountText) : NaN;
+  const canConfirmServing = !item.fatsecret_serving_id &&
+    typeof food?.servingId === 'string' &&
+    /^[0-9]+$/.test(food.servingId) && !/^0+$/.test(food.servingId);
 
   const [itemType, setItemType] = useState<PantryType>(item.item_type);
   const [expiration, setExpiration] = useState(item.expiration_date ?? '');
@@ -78,6 +92,27 @@ function PantryEditForm({
     if (!requestInProgress.current) onClose();
   }
 
+  function changeUnit(next: string) {
+    if (servingConfirmed) {
+      const converted = convertPantryQuantity(food, amount, unit, next);
+      if (converted !== null) {
+        setQuantity(String(Number(converted.toPrecision(12))));
+      }
+    }
+    setUnit(next);
+    setError(null);
+  }
+
+  function confirmServing() {
+    if (!canConfirmServing) return;
+    // Old "pieces", "bags", and even "servings" have no confirmed basis.
+    // Require a fresh amount instead of guessing what the old quantity meant.
+    setServingConfirmed(true);
+    setUnit('servings');
+    setQuantity('');
+    setError(null);
+  }
+
   async function submit(action: 'save' | 'remove') {
     if (requestInProgress.current) return;
 
@@ -90,8 +125,14 @@ function PantryEditForm({
         return;
       }
 
-      if (!PANTRY_UNITS.some((option) => option.value === unit)) {
+      if (!units.some((option) => option.value === unit)) {
         setError('Choose a unit before saving.');
+        return;
+      }
+
+      if (servingConfirmed &&
+          pantryServingMultiplier(food, Number(amountText), unit) === null) {
+        setError('Enter a positive amount using a supported unit.');
         return;
       }
     }
@@ -109,6 +150,10 @@ function PantryEditForm({
         await updatePantryItem(item.pantry_item_id, {
           quantity: Number(amountText),
           unit,
+          // Omission preserves old or temporarily unavailable serving references.
+          ...(servingConfirmed && food?.servingId
+            ? { servingId: food.servingId }
+            : {}),
           itemType,
           expirationDate: expiration.trim() || null,
         });
@@ -214,30 +259,48 @@ function PantryEditForm({
             <Text style={styles.label}>Unit</Text>
             <PantryUnitPicker
               value={unit}
-              onChange={setUnit}
+              onChange={changeUnit}
+              options={units}
               disabled={busy || confirmRemove}
             />
             <Text style={styles.hint}>
-              Amounts describe your inventory; nutrition is not
-              automatically calculated.
+              {servingConfirmed
+                ? `1 serving = ${food?.serving || 'the selected portion'} ${item.name}`
+                : 'Your saved amount is preserved. Nutrition needs a confirmed serving.'}
             </Text>
 
-            <Text style={styles.label}>Expiration date — optional</Text>
-            <TextInput
-              value={expiration}
-              onChangeText={setExpiration}
-              editable={!busy && !confirmRemove}
-              accessibilityLabel="Optional expiration date, YYYY-MM-DD"
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={colors.textMuted}
-              autoCorrect={false}
-              autoCapitalize="none"
-              maxLength={10}
-              style={styles.input}
+            {!servingConfirmed && canConfirmServing && (
+              <View style={styles.confirmBox}>
+                <Text style={styles.confirmTitle}>Confirm the serving</Text>
+                <Text style={styles.hint}>
+                  Available serving: {food?.serving || '1 serving'}. Your saved
+                  amount is {item.quantity} {item.unit}. Choose below and enter
+                  the amount again using this serving or a compatible unit.
+                </Text>
+                <Pressable
+                  onPress={confirmServing}
+                  disabled={busy || confirmRemove}
+                  accessibilityRole="button"
+                  style={styles.textButton}
+                >
+                  <Text style={styles.linkText}>Use this serving and enter amount</Text>
+                </Pressable>
+              </View>
+            )}
+
+            <PantryNutritionSummary
+              food={food}
+              quantity={amount}
+              unit={unit}
+              enabled={servingConfirmed}
             />
-            <Text style={styles.hint}>
-              Clear this field to remove the expiration date.
-            </Text>
+
+            <Text style={styles.label}>Expiration date — optional</Text>
+            <PantryExpirationPicker
+              value={expiration}
+              onChange={setExpiration}
+              disabled={busy || confirmRemove}
+            />
 
             {error && (
               <Text accessibilityRole="alert" style={styles.error}>

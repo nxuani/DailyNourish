@@ -9,8 +9,8 @@ import {
 
 import { colors, fontSize } from '@/theme/tokens';
 
-// Inventory units only. These do not imply a FatSecret serving size
-// or automatically calculate nutrition.
+// Legacy inventory choices remain available to the existing edit form.
+// New forms supply food-specific options explicitly.
 export const PANTRY_UNITS = [
   { value: 'pieces', label: 'Pieces' },
   { value: 'servings', label: 'Servings' },
@@ -31,16 +31,18 @@ type Props = {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  options?: readonly { value: string; label: string }[];
 };
 
 export default function PantryUnitPicker({
   value,
   onChange,
   disabled = false,
+  options = PANTRY_UNITS,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
 
-  const selected = PANTRY_UNITS.find(
+  const selected = options.find(
     (option) => option.value === value
   );
 
@@ -78,7 +80,7 @@ export default function PantryUnitPicker({
             nestedScrollEnabled
             keyboardShouldPersistTaps="handled"
           >
-            {PANTRY_UNITS.map((option) => {
+            {options.map((option) => {
               const checked = value === option.value;
 
               return (
