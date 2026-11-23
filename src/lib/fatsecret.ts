@@ -49,6 +49,13 @@ export type FoodSearchItem = {
     url: string | null;
     image: string | null; // food photo URL (null unless Premier images are enabled)
     serving: string | null; // e.g. "240g", "1 serving"
+    // Optional for compatibility with older proxy responses.
+    servingId?: string | null;
+    metricServingAmount?: number | null;
+    metricServingUnit?: 'g' | 'ml' | 'oz' | null;
+    numberOfUnits?: number | null;
+    measurementDescription?: string | null;
+
     calories: number | null;
     protein: number | null;
     fat: number | null;
@@ -161,17 +168,34 @@ export async function getStockImages(
     return out;
 }
 
-// Retrieve a saved pantry food through our proxy.
-// This requires the new /food route on the deployed proxy.
-export async function getFoodById(id: string): Promise<FoodSearchItem> {
+// Retrieve the default serving, or a specific saved serving.
+export async function getFoodById(
+    id: string,
+    servingId: string | null = null
+): Promise<FoodSearchItem> {
     if (!/^[0-9]+$/.test(id)) {
         throw new Error('Invalid food ID.');
     }
 
-    const food = await proxyGet<FoodSearchItem>('/food', { id });
+    if (
+        servingId !== null &&
+        (!/^[0-9]+$/.test(servingId) || /^0+$/.test(servingId))
+    ) {
+        throw new Error('Invalid serving ID.');
+    }
+
+    const food = await proxyGet<FoodSearchItem>('/food', {
+        id,
+        serving_id: servingId ?? undefined,
+    });
 
     if (String(food.id) !== id || typeof food.name !== 'string') {
         throw new Error('Unexpected food details returned.');
+    }
+
+    // Never calculate using a different serving than the one requested.
+    if (servingId !== null && food.servingId !== servingId) {
+        throw new Error('The saved serving could not be retrieved.');
     }
 
     return food;

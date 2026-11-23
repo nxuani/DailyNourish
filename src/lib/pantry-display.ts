@@ -1,16 +1,19 @@
-import { getFoodById } from './fatsecret';
+import { getFoodById, type FoodSearchItem } from './fatsecret';
 import { loadPantryItems, type PantryItemRow } from './pantry';
 import { supabase } from './supabase';
 
 export type PantryDisplayItem = PantryItemRow & {
   name: string;
   image: string | null;
+  // Retrieved for display and calculations; not stored in the database.
+  food: FoodSearchItem | null;
   detailsUnavailable: boolean;
 };
 
 type FoodDisplayDetails = {
   name: string;
   image: string | null;
+  food: FoodSearchItem | null;
 };
 
 // Load saved inventory and retrieve its current names and images.
@@ -22,8 +25,9 @@ export async function loadPantryDisplay(): Promise<PantryDisplayItem[]> {
   const details = new Map<string, Promise<FoodDisplayDetails>>();
 
   function findDetails(row: PantryItemRow): Promise<FoodDisplayDetails> {
+    // Different servings of the same food need separate lookups.
     const key = row.fatsecret_food_id !== null
-      ? `fatsecret:${row.fatsecret_food_id}`
+      ? `fatsecret:${row.fatsecret_food_id}:${row.fatsecret_serving_id ?? 'default'}`
       : `ingredient:${row.ingredient_id}`;
 
     const existing = details.get(key);
@@ -31,11 +35,15 @@ export async function loadPantryDisplay(): Promise<PantryDisplayItem[]> {
 
     const request = (async (): Promise<FoodDisplayDetails> => {
       if (row.fatsecret_food_id !== null) {
-        const food = await getFoodById(row.fatsecret_food_id);
+        const food = await getFoodById(
+          row.fatsecret_food_id,
+          row.fatsecret_serving_id
+        );
 
         return {
           name: food.name,
           image: food.image ?? null,
+          food,
         };
       }
 
@@ -60,6 +68,7 @@ export async function loadPantryDisplay(): Promise<PantryDisplayItem[]> {
       return {
         name: data.name,
         image: null,
+        food: null,
       };
     })();
 
@@ -87,6 +96,7 @@ export async function loadPantryDisplay(): Promise<PantryDisplayItem[]> {
             ...row,
             name: 'Food details unavailable',
             image: null,
+            food: null,
             detailsUnavailable: true,
           };
         }
