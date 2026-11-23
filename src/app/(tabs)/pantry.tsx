@@ -1,4 +1,6 @@
 import PantryEditSheet from '@/components/pantry-edit-sheet';
+import { pantryNutrition } from '@/lib/pantry-nutrition';
+import { sortPantryItems, type PantrySort } from '@/lib/pantry-sort';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -30,6 +32,8 @@ const TABS: { value: PantryType; label: string }[] = [
 export default function PantryScreen() {
   const [activeTab, setActiveTab] = useState<PantryType>('ingredient');
   const [query, setQuery] = useState('');
+  const [sortOrder, setSortOrder] = useState<PantrySort>('newest');
+  const [sortOpen, setSortOpen] = useState(false);
   const [items, setItems] = useState<PantryDisplayItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,12 +85,12 @@ export default function PantryScreen() {
   const searchTerm = query.trim().toLowerCase();
   const tabItems = items.filter((item) => item.item_type === activeTab);
 
-  const visibleItems = tabItems.filter(
+  const visibleItems = sortPantryItems(tabItems.filter(
     (item) =>
       // Keep unresolved items visible so search doesn't hide a lookup failure.
       item.detailsUnavailable ||
       item.name.toLowerCase().includes(searchTerm)
-  );
+  ), sortOrder);
 
   const hasUnavailableDetails = items.some(
     (item) => item.detailsUnavailable
@@ -150,7 +154,7 @@ export default function PantryScreen() {
             return (
               <Pressable
                 key={tab.value}
-                onPress={() => setActiveTab(tab.value)}
+                onPress={() => { setActiveTab(tab.value); setSortOpen(false); }}
                 accessibilityRole="tab"
                 accessibilityState={{ selected }}
                 style={[styles.tab, selected && styles.selectedTab]}
@@ -176,6 +180,47 @@ export default function PantryScreen() {
             ? 'Ingredients for your next meal.'
             : 'Prepared meals and saved portions.'}
         </Text>
+
+        <View style={styles.sortSection}>
+          <Pressable
+            onPress={() => setSortOpen((open) => !open)}
+            accessibilityRole="button"
+            accessibilityLabel={`Sort by ${sortOrder === 'newest' ? 'newest added' : 'expiration date'}`}
+            accessibilityState={{ expanded: sortOpen }}
+            style={styles.sortControl}
+          >
+            <Ionicons name="swap-vertical-outline" size={16} color={colors.primary} />
+            <Text style={styles.sortText}>
+              Sort: {sortOrder === 'newest' ? 'Newest added' : 'Expiration date'}
+            </Text>
+            <Ionicons
+              name={sortOpen ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={colors.primary}
+            />
+          </Pressable>
+          {sortOpen && (
+            <View style={styles.sortMenu}>
+              {([
+                ['newest', 'Newest added'],
+                ['expiration', 'Expiration date'],
+              ] as const).map(([value, label]) => (
+                <Pressable
+                  key={value}
+                  onPress={() => { setSortOrder(value); setSortOpen(false); }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: sortOrder === value }}
+                  style={styles.sortMenuItem}
+                >
+                  <Text style={styles.sortMenuText}>{label}</Text>
+                  {sortOrder === value && (
+                    <Ionicons name="checkmark" size={18} color={colors.primary} />
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
 
         {loading ? (
           <View style={styles.messageBox}>
@@ -233,6 +278,14 @@ export default function PantryScreen() {
             ) : (
               <View style={styles.list}>
                 {visibleItems.map((item) => {
+                  const servingKnown = Boolean(item.fatsecret_serving_id &&
+                    item.food?.servingId === item.fatsecret_serving_id);
+                  const nutrition = servingKnown
+                    ? pantryNutrition(item.food, item.quantity, item.unit)
+                    : null;
+                  const unitLabel = item.unit === 'portion' && servingKnown
+                    ? item.food?.measurementDescription || 'portion'
+                    : item.unit;
                   const status = expirationStatus(item.expiration_date);
                   const statusColor = status.warning
                     ? colors.warning
@@ -256,7 +309,19 @@ export default function PantryScreen() {
                       <View style={styles.cardContent}>
                         <Text style={styles.itemName}>{item.name}</Text>
                         <Text style={styles.quantity}>
-                          {item.quantity} {item.unit}
+                          {Number(item.quantity.toPrecision(12))} {unitLabel}
+                        </Text>
+                        {servingKnown && item.food?.serving && (
+                          <Text style={styles.quantity}>
+                            1 serving = {item.food.serving} {item.name}
+                          </Text>
+                        )}
+                        <Text style={styles.quantity}>
+                          {nutrition?.calories != null
+                            ? `${Math.round(nutrition.calories)} kcal in stock`
+                            : item.fatsecret_food_id && !item.fatsecret_serving_id
+                              ? 'Select a serving for nutrition'
+                              : 'Nutrition unavailable'}
                         </Text>
                         <View style={styles.expirationRow}>
                           <View
@@ -409,6 +474,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.heading,
   },
+  sortSection: { marginTop: 12, alignItems: 'flex-end' },
+  sortControl: {
+    minHeight: 44, flexDirection: 'row', flexWrap: 'wrap',
+    alignItems: 'center', justifyContent: 'flex-end', gap: 6,
+    paddingVertical: 8, paddingHorizontal: 2,
+  },
+  sortText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.primary },
+  sortMenu: {
+    minWidth: 210, maxWidth: '100%', padding: 4, borderRadius: 12,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  sortMenuItem: {
+    minHeight: 48, paddingHorizontal: 12, paddingVertical: 10,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+  },
+  sortMenuText: { fontSize: fontSize.base, color: colors.text },
   list: { marginTop: 20, gap: 14 },
   card: {
     flexDirection: 'row',

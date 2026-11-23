@@ -1,3 +1,5 @@
+import { colors } from '@/constants/colors';
+import { Spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { router } from 'expo-router';
@@ -15,19 +17,7 @@ import {
     View
 } from 'react-native';
 
-const COLORS = 
-{
-    background: '#f7f5ed',
-    green: '#244d3f',
-    text: '#244B3B',
-    secondary: '#718071',
-    white: '#fffdf7',
-    selected: '#e9ede3',
-    progressEmpty: '#ffffff',
-    border: '#e5e5da',
-};
-
-const TOTAL_STEPS = 7;
+const TOTAL_STEPS = 9;
 
 const GENDERS = [
     'Female',
@@ -41,6 +31,11 @@ const ACTIVITY_LEVELS = [
     'Moderately active',
     'Lightly active',
     'Not active',
+];
+
+const MEAL_GEN_OPTIONS = [
+    'Ingredients in My Pantry',
+    'My Goals',
 ];
 
 const MONTHS = [
@@ -66,11 +61,13 @@ export default function ProfileIntakeScreen()
     const initialPickerDate = new Date(1997, 8, 1);
     const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
 
+    const [name, setName] = useState('');
     const [gender, setGender] = useState('');
     const [heightft, setHeightft] = useState('');
     const [heightin, setHeightin] = useState('');
     const [weight, setWeight] = useState('');
     const [activityLevel, setActivityLevel] = useState('');
+    const [generatingmeals, setGeneratingMeals] = useState<string[]>([]);
     const [goal, setGoal] = useState('');
     const [allergies, setAllergies] = useState('');
     const [restrictions, setRestrictions] = useState('')
@@ -83,7 +80,14 @@ export default function ProfileIntakeScreen()
         }
         else
         {
-            router.back();
+            if(router.canGoBack())
+            {
+                router.back();
+            }
+            else
+            {
+                router.replace('/');
+            }
         }
     };
 
@@ -96,7 +100,17 @@ export default function ProfileIntakeScreen()
 
     //validate answers before allowing user to continue
     const validateCurrentStep = () => {
-        if(step === 0 && !dateOfBirth)
+        //validate name on name screen
+        if(step === 0 && !name.trim())
+        {
+            Alert.alert(
+                'Name required',
+                'Please enter your name before continuing'
+            );
+            return false;
+        }
+
+        if(step === 1 && !dateOfBirth)
         {
             Alert.alert(
                 'Date of birth',
@@ -106,7 +120,7 @@ export default function ProfileIntakeScreen()
         }
 
         //validate height and weight on measurement screen
-        if(step === 2)
+        if(step === 3)
         {
             const ft = Number(heightft);
             const inches = Number(heightin);
@@ -141,7 +155,7 @@ export default function ProfileIntakeScreen()
         }
 
         //validate activity level
-        if(step === 3 && !activityLevel)
+        if(step === 4 && !activityLevel)
         {
             Alert.alert(
                 'Activity level',
@@ -150,8 +164,18 @@ export default function ProfileIntakeScreen()
             return false;
         }
 
+        //validate meal generation on meal gen screen
+        if(step === 5 && generatingmeals.length === 0)
+        {
+            Alert.alert(
+                'Meal generation preferences',
+                'Please select at least one option to help generate your meal plan'
+            );
+            return false;
+        }
+
         //validate goal
-        if(step === 4 && !goal.trim())
+        if(step === 6 && !goal.trim())
         {
             Alert.alert(
                 'Goal',
@@ -188,6 +212,7 @@ export default function ProfileIntakeScreen()
         {
             return;
         }
+        setSaving(true);
 
         try {
             //find the currently signed in supabase user
@@ -240,8 +265,9 @@ export default function ProfileIntakeScreen()
 
                 //use account name when available otherwise use part of email before @
                 name:
-                    user.user_metadata?.name ??
-                    user.email?.split('@')[0] ??
+                    name.trim() ||
+                    user.user_metadata?.name ||
+                    user.email?.split('@')[0] ||
                     'User',
                 email: user.email ?? '',
 
@@ -254,6 +280,7 @@ export default function ProfileIntakeScreen()
                 weight: weightKg,
                 activity_level: activityLevel || null,
                 restrictions: restrictions.trim() || null,
+                intake_completed: true,
             };
 
             //check whether the user already has a profile
@@ -408,8 +435,7 @@ export default function ProfileIntakeScreen()
                 selected && styles.selectedOption,
             ]}
         >
-            <Text
-                style={[
+            <Text style={[
                     styles.optionText,
                     selected && styles.selectedOptionText,
                 ]}
@@ -419,7 +445,28 @@ export default function ProfileIntakeScreen()
         </Pressable>
     );
 
-    //screen 1: date of birth
+    //screen 1: name
+    const renderName = () => (
+        <>
+            <Text style={styles.nameHeading}>
+                What is your name?
+            </Text>
+
+            <Text style={styles.helperText}>
+                This will be displayed in your profile
+            </Text>
+
+            <TextInput
+                style={styles.nameInput}
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+            />
+        </>
+    );
+
+
+    //screen 2: date of birth
     const renderDateOfBirth = () => (
         <>
             <Text style={styles.dateOfBirthHeading}>
@@ -452,7 +499,7 @@ export default function ProfileIntakeScreen()
         </>
     );
 
-    //screen 2: gender
+    //screen 3: gender
     const renderGender = () => (
         <>
             <Text style={styles.genderHeading}>
@@ -471,7 +518,7 @@ export default function ProfileIntakeScreen()
         </>
     );
 
-    //screen 3: height and weight
+    //screen 4: height and weight
     const renderHeightWeight = () => (
         <>
             <Text style={styles.heightWeightHeading}>
@@ -489,7 +536,7 @@ export default function ProfileIntakeScreen()
                             setHeightft(value.replace(/[^0-9]/g, '').slice(0, 1))
                         }
                         placeholder="5 ft"
-                        placeholderTextColor={COLORS.secondary}
+                        placeholderTextColor={colors.muted}
                         keyboardType="number-pad"
                         maxLength={1}
                     />
@@ -505,7 +552,7 @@ export default function ProfileIntakeScreen()
                             setHeightin(value.replace(/[^0-9]/g, '').slice(0, 2))
                         }
                         placeholder="10 in"
-                        placeholderTextColor={COLORS.secondary}
+                        placeholderTextColor={colors.muted}
                         keyboardType="number-pad"
                         maxLength={2}
                     />
@@ -523,14 +570,14 @@ export default function ProfileIntakeScreen()
                         setWeight(value.replace(/[^0-9.]/g, ''))
                     }
                     placeholder="150 lb"
-                    placeholderTextColor={COLORS.secondary}
+                    placeholderTextColor={colors.muted}
                     keyboardType="decimal-pad"
                 />
             </View>
         </>
     );
 
-    //screen 4: activity level
+    //screen 5: activity level
     const renderActivity = () => (
         <>
             <Text style={styles.activityLevelHeading}>
@@ -549,7 +596,52 @@ export default function ProfileIntakeScreen()
         </>
     );
 
-    //screen 5: health goal
+    //screen 6: generating meal options
+    const renderGeneratingMeals = () => (
+        <>
+            <Text style={styles.mealGenerationHeading}>
+                What information would you like to use in generating your meals plan?
+            </Text>
+
+            <Text style={styles.helperText}>
+                Pick one or as many as you like, allergies and restrictions are default
+            </Text>
+
+            <View style={styles.options}>
+                {MEAL_GEN_OPTIONS.map((item) => {
+                    const selected = generatingmeals.includes(item);
+                    return (
+                        <Pressable
+                            key={item}
+                            onPress={() => {
+                                setGeneratingMeals((current) =>
+                                    current.includes(item)
+                                        ? current.filter((option) => option !== item)
+                                        : [...current, item]
+                                );
+                            }}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected }}
+                            style={[
+                                styles.option,
+                                selected && styles.selectedOption,
+                            ]}
+                        >
+                            <Text style={[
+                                styles.optionText,
+                                selected && styles.selectedOptionText,
+                            ]}
+                            >
+                                {item}
+                            </Text>
+                        </Pressable>
+                    );
+                })}
+            </View>
+        </>
+    );
+
+    //screen 7: health goal
     const renderGoal = () => (
         <>
             <Text style={styles.goalHeading}>
@@ -561,7 +653,7 @@ export default function ProfileIntakeScreen()
                 or one of the examples provided
             </Text>
 
-            {/* text field for user's personal goa */}
+            {/* text field for user's personal goal */}
             <View style={styles.textAreaCard}>
                 <TextInput
                     style={styles.goalInput}
@@ -570,7 +662,7 @@ export default function ProfileIntakeScreen()
                     placeholder="Examples: Weight loss, Muscle gain,
                         Maintain weight, Heart health, Diabetes management,
                         High blood pressure management"
-                    placeholderTextColor="#92988a"
+                    placeholderTextColor={colors.muted}
                     multiline
                     textAlignVertical="top"
                 />
@@ -578,7 +670,7 @@ export default function ProfileIntakeScreen()
         </>
     );
 
-    //screen 6: food allergies
+    //screen 8: food allergies
     const renderAllergies = () => (
         <>
             <Text style={styles.allergyHeading}>
@@ -594,14 +686,14 @@ export default function ProfileIntakeScreen()
                 value={allergies}
                 onChangeText={setAllergies}
                 placeholder="Examples: Peanuts, Shellfish, Milk"
-                placeholderTextColor="#92988a"
+                placeholderTextColor={colors.muted}
                 multiline
                 textAlignVertical="top"
             />
         </>
     );
 
-    //screen 7: dietary restrictions
+    //screen 9: dietary restrictions
     const renderRestrictions = () => (
         <>
             <Text style={styles.restrictionHeading}>
@@ -617,7 +709,7 @@ export default function ProfileIntakeScreen()
                 value={restrictions}
                 onChangeText={setRestrictions}
                 placeholder="Examples: Vegan, Vegetarian, halal, Onions, Pork, Cilantro"
-                placeholderTextColor="#92988a"
+                placeholderTextColor={colors.muted}
                 multiline
                 textAlignVertical="top"
             />
@@ -629,24 +721,30 @@ export default function ProfileIntakeScreen()
         switch(step)
         {
             case 0:
-                return renderDateOfBirth();
+                return renderName();
             
             case 1:
-                return renderGender();
+                return renderDateOfBirth();
             
             case 2:
-                return renderHeightWeight();
+                return renderGender();
             
             case 3:
-                return renderActivity();
+                return renderHeightWeight();
             
             case 4:
-                return renderGoal();
+                return renderActivity();
             
             case 5:
+                return renderGeneratingMeals();
+                
+            case 6:
+                return renderGoal();
+                
+            case 7:
                 return renderAllergies();
 
-            case 6:
+            case 8:
                 return renderRestrictions();
 
             default:
@@ -673,9 +771,10 @@ export default function ProfileIntakeScreen()
                         >
                             <Text style={styles.backArrowText}>‹</Text>
                         </Pressable>
+                    
 
                         {/* hide skip on final screen */}
-                        {step < TOTAL_STEPS - 1 && (
+                        {step < TOTAL_STEPS - 1 && (  //step === 0
                             <Pressable
                                 onPress={skipStep}
                                 style={styles.skipButton}
@@ -760,14 +859,14 @@ const styles = StyleSheet.create({
     safeArea: 
     {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: colors.background,
     },
 
     screen:
     {
         flex: 1,
-        backgroundColor: COLORS.background,
-        paddingHorizontal: 20,
+        backgroundColor: colors.background,
+        paddingHorizontal: Spacing.three + Spacing.one,
         paddingTop: 12,
         paddingBottom: 18,
     },
@@ -794,22 +893,22 @@ const styles = StyleSheet.create({
         fontSize: 34,
         lineHeight: 34,
         fontWeight: '700',
-        color: COLORS.green,
+        color: colors.primary,
     },
 
     skipButton:
     {
-        paddingHorizontal: 4,
+        paddingHorizontal: Spacing.one,
         paddingVertical: 6,
     },
 
     skipText:
     {
         fontSize: 18,
-        color: COLORS.green,
+        color: colors.primary,
     },
 
-    //seven horizontal segments show progress through the questions
+    //9 horizontal segments show progress through the questions
     progressBar:
     {
         flexDirection: 'row',
@@ -822,12 +921,12 @@ const styles = StyleSheet.create({
         flex: 1,
         height: 4,
         borderRadius: 3,
-        backgroundColor: COLORS.white,
+        backgroundColor: colors.card,
     },
 
     progressActive:
     {
-        backgroundColor: COLORS.green,
+        backgroundColor: colors.primary,
     },
 
     scrollContent:
@@ -835,13 +934,35 @@ const styles = StyleSheet.create({
         flexGrow: 1,
         paddingBottom: 18,
     },
+
+    nameHeading:
+    {
+        fontSize: 32,
+        fontWeight: '700',
+        lineHeight: 35,
+        color: colors.ink,
+        textAlign: 'center',
+        marginTop: 10,
+        marginBottom: 25,
+    },
+
+    nameInput:
+    {
+        minHeight: 48,
+        borderRadius: 12,
+        backgroundColor: colors.card,
+        paddingHorizontal: Spacing.three,
+        fontSize: 16,
+        color: colors.ink,
+        marginTop: 10,
+    },
  
     dateOfBirthHeading:
     {
         fontSize: 32,
         fontWeight: '700',
         lineHeight: 35,
-        color: COLORS.text,
+        color: colors.ink,
         textAlign: 'center',
         marginTop: 10,
         marginBottom: 25,
@@ -860,7 +981,7 @@ const styles = StyleSheet.create({
     {
         marginTop: 30,
         flexDirection: 'row',
-        backgroundColor: COLORS.white,
+        backgroundColor: colors.card,
         borderRadius: 18,
         padding: 10,
         gap: 8,
@@ -872,7 +993,7 @@ const styles = StyleSheet.create({
         fontSize: 32,
         fontWeight: '700',
         lineHeight: 35,
-        color: COLORS.text,
+        color: colors.ink,
         textAlign: 'center',
         marginTop: 10,
         marginBottom: 25,
@@ -883,7 +1004,7 @@ const styles = StyleSheet.create({
         fontSize: 32,
         fontWeight: '700',
         lineHeight: 35,
-        color: COLORS.text,
+        color: colors.ink,
         textAlign: 'center',
         marginTop: 10,
         marginBottom: 25,
@@ -907,10 +1028,10 @@ const styles = StyleSheet.create({
     {
         minHeight: 42,
         borderRadius: 9,
-        backgroundColor: COLORS.white,
-        paddingHorizontal: 12,
+        backgroundColor: colors.card,
+        paddingHorizontal: Spacing.two + Spacing.one,
         fontSize: 15,
-        color: COLORS.text,
+        color: colors.ink,
     },
 
     weightSection: 
@@ -923,10 +1044,28 @@ const styles = StyleSheet.create({
         fontSize: 32,
         fontWeight: '700',
         lineHeight: 35,
-        color: COLORS.text,
+        color: colors.ink,
         textAlign: 'center',
         marginTop: 10,
         marginBottom: 25,
+    },
+
+    mealGenerationHeading:
+    {
+        fontSize: 29,
+        fontWeight: '700',
+        lineHeight: 35,
+        color: colors.ink,
+        textAlign: 'center',
+        marginTop: 10,
+        marginBottom: 25,
+    },
+
+    mealGenerationOption:
+    {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
     },
 
     goalHeading:
@@ -934,7 +1073,7 @@ const styles = StyleSheet.create({
         fontSize: 32,
         fontWeight: '700',
         lineHeight: 35,
-        color: COLORS.text,
+        color: colors.ink,
         textAlign: 'center',
         marginTop: 10,
         marginBottom: 25,
@@ -945,7 +1084,7 @@ const styles = StyleSheet.create({
         minHeight: 180,
         fontSize: 14,
         lineHeight: 20,
-        color: COLORS.text,
+        color: colors.ink,
         padding: 2,
         paddingTop: 0,
     },
@@ -955,7 +1094,7 @@ const styles = StyleSheet.create({
         fontSize: 32,
         fontWeight: '700',
         lineHeight: 35,
-        color: COLORS.text,
+        color: colors.ink,
         textAlign: 'center',
         marginTop: 10,
         marginBottom: 25,
@@ -966,7 +1105,7 @@ const styles = StyleSheet.create({
         fontSize: 32,
         fontWeight: '700',
         lineHeight: 35,
-        color: COLORS.text,
+        color: colors.ink,
         textAlign: 'center',
         marginTop: 10,
         marginBottom: 25,
@@ -983,10 +1122,10 @@ const styles = StyleSheet.create({
     {
         minHeight: 48,
         borderRadius: 12,
-        backgroundColor: COLORS.white,
+        backgroundColor: colors.card,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 12,
+        paddingHorizontal: Spacing.two + Spacing.one,
         paddingVertical: 12,
         borderWidth: 1,
         borderColor: 'transparent',
@@ -995,46 +1134,46 @@ const styles = StyleSheet.create({
     //highlight the selected option
     selectedOption:
     {
-        backgroundColor: COLORS.selected,
-        borderColor: COLORS.green,
+        backgroundColor: colors.focusBackground,
+        borderColor: colors.primary,
     },
 
     optionText:
     {
         fontSize: 16,
-        color: COLORS.secondary,
+        color: colors.muted,
         textAlign: 'center',
     },
 
     selectedOptionText:
     {
-        color: COLORS.green,
+        color: colors.primary,
         fontWeight: '600',
     },
 
     fieldLabel:
     {
         fontSize: 14,
-        color: COLORS.secondary,
+        color: colors.muted,
         marginBottom: 4,
         marginLeft: 5,
     },
 
     helperText: 
     {
-        color: '#899180',
-        fontSize: 11,
+        color: colors.muted,
+        fontSize: 13,
         lineHeight: 15,
         textAlign: 'center',
         marginTop: -5,
         marginBottom: 30,
-        paddingHorizontal: 8,
+        paddingHorizontal: Spacing.two,
     },
 
     //white box used to display goal options
     textAreaCard: 
     {
-        backgroundColor: COLORS.white,
+        backgroundColor: colors.card,
         borderRadius: 17,
         padding: 14,
         gap: 13,
@@ -1044,12 +1183,12 @@ const styles = StyleSheet.create({
     allergiesTextArea: 
     {
         height: 208,
-        backgroundColor: COLORS.white,
+        backgroundColor: colors.card,
         borderRadius: 17,
         padding: 16,
         fontSize: 14,
         lineHeight: 17,
-        color: COLORS.text,
+        color: colors.ink,
         marginTop: 16,
     },
 
@@ -1057,12 +1196,12 @@ const styles = StyleSheet.create({
     restrictionsTextArea:
     {
         height: 210,
-        backgroundColor: COLORS.white,
+        backgroundColor: colors.card,
         borderRadius: 17,
         padding: 16,
         fontSize: 14,
         lineHeight: 17,
-        color: COLORS.text,
+        color: colors.ink,
         marginTop: 1,
     },
 
@@ -1081,22 +1220,22 @@ const styles = StyleSheet.create({
         borderRadius: 7,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 8,
+        paddingHorizontal: Spacing.two,
     },
 
     continueButton: 
     {
-        backgroundColor: COLORS.green,
+        backgroundColor: colors.primary,
     },
 
     secondaryButton: 
     {
-        backgroundColor: COLORS.green,
+        backgroundColor: colors.primary,
     },
 
     buttonText: 
     {
-        color: COLORS.white,
+        color: colors.card,
         fontSize: 15,
         fontWeight: '700',
     },
