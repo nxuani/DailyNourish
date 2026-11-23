@@ -38,7 +38,7 @@ export default function TabLayout() {
               <Ionicons
                 name={focused ? tab.iconActive : tab.icon}
                 size={size - 4}
-                color={color}
+                color={focused ? colors.primary : colors.muted}
               />
             ),
             tabBarLabel: ({ color, focused }) => (

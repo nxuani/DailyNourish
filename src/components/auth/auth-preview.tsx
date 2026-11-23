@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 import type { Session } from '@supabase/supabase-js';
-import { getSupabase } from './supabase';
+import { router } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import {
   AppState,
   KeyboardAvoidingView,
@@ -14,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { getSupabase } from './supabase';
 
 // Keep the initial authentication palette here so the shared starter theme is untouched.
 const colors = {
@@ -108,6 +110,7 @@ export default function AuthPreview({ onSignedInChange }: {
       if (error) throw error;
       setSession(null);
       setStatus('You are signed out.');
+      router.replace('/');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not sign out. Try again.');
     } finally {
@@ -116,11 +119,52 @@ export default function AuthPreview({ onSignedInChange }: {
     }
   }
 
-  function authenticated(next: Session) {
+  async function authenticated(next: Session) {
     setSession(next);
     setStatus('You are signed in.');
     setMode(null); // Show the signed-in placeholder until intake/Home routes are ready.
+
+    //get signed in user
+  const
+  {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if(authError || !user )
+  {
+    console.error('Unable to get signed in user:', authError);
+    return;
   }
+
+  //check whether user finished profile intake
+  const
+  {
+    data: profile,
+    error: profileError,
+  } = await supabase
+        .from('users')
+        .select('intake_completed')
+        .eq('auth_id', user.id)
+        .maybeSingle();
+  
+  if(profileError)
+  {
+    console.error('Unable to check profile completion:', profileError);
+    return;
+  }
+
+  //returning users go to home and new users go through profile intake
+  if(profile?.intake_completed == true)
+  {
+    router.replace('/(tabs)');
+  }
+  else
+  {
+    router.replace('/profile-intake');
+  }
+  }
+
   return (
     <View style={styles.entry}>
       {session ? (
