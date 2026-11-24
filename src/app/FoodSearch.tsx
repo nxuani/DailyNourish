@@ -265,7 +265,13 @@ function FoodCard({
     );
 }
 
-function RecipeCard({ item }: { item: RecipeItem }) {
+function RecipeCard({
+    item,
+    onPress,
+}: {
+    item: RecipeItem;
+    onPress?: () => void;
+}) {
     return (
         <ResultCard
             image={item.image}
@@ -273,6 +279,7 @@ function RecipeCard({ item }: { item: RecipeItem }) {
             title={item.name}
             meta={`${fmt(item.calories)} cal • ${fmt(item.protein)} g protein`}
             tag={item.types[0] || null}
+            onPress={onPress}
         />
     );
 }
@@ -586,6 +593,15 @@ export default function FoodSearch() {
                                                 i.category
                                             )}
                                             title={i.name}
+                                            onPress={() =>
+                                                router.push({
+                                                    pathname: '/food-details',
+                                                    params: {
+                                                        type: 'food',
+                                                        name: i.name,
+                                                    },
+                                                })
+                                            }
                                         />
                                     ))}
                                 </View>
@@ -635,7 +651,19 @@ export default function FoodSearch() {
                         <View style={styles.list}>
                             {isRecipes
                                 ? recipes.map((item) => (
-                                      <RecipeCard key={item.id} item={item} />
+                                      <RecipeCard
+                                          key={item.id}
+                                          item={item}
+                                          onPress={() =>
+                                              router.push({
+                                                  pathname: '/food-details',
+                                                  params: {
+                                                      type: 'recipe',
+                                                      id: item.id,
+                                                  },
+                                              })
+                                          }
+                                      />
                                   ))
                                 : foodsShown.map((item) => (
                                       <FoodCard
@@ -647,7 +675,15 @@ export default function FoodSearch() {
                                                     setOpenSheet(null);
                                                     setSelectedFood(item);
                                                 }
-                                                : undefined
+                                                : () =>
+                                                      router.push({
+                                                          pathname:
+                                                              '/food-details',
+                                                          params: {
+                                                              type: 'food',
+                                                              id: item.id,
+                                                          },
+                                                      })
                                         }
                                     />
                                   ))}

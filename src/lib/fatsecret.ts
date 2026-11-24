@@ -60,6 +60,12 @@ export type FoodSearchItem = {
     protein: number | null;
     fat: number | null;
     carbs: number | null;
+    // Extended nutrition for the Food Details facts card. Optional because older
+    // proxy responses (before the /recipe work) didn't include them.
+    saturatedFat?: number | null;
+    fiber?: number | null;
+    sugars?: number | null;
+    sodium?: number | null;
     diets: string[]; // dietary preferences present, e.g. ["Vegan","Vegetarian"]
     allergens: string[]; // allergens present, e.g. ["Soy"]
     subCategories: string[]; // food categories, e.g. ["Cakes"] (icon fallback)
@@ -199,4 +205,62 @@ export async function getFoodById(
     }
 
     return food;
+}
+
+// ---- Recipe detail (full breakdown via recipe.get) -------------------------
+// Richer than RecipeItem (the search result): ingredients, steps, and times.
+// Only recipes have this — plain foods/ingredients use getFoodById instead.
+
+export type RecipeDetailIngredient = {
+    foodId: string | null;
+    name: string | null;
+    quantity: number | null; // amount for the WHOLE recipe (makes `servings`)
+    unit: string | null;
+    description: string | null; // full text, e.g. "4 oz chicken cutlets"
+};
+
+export type RecipeDetailStep = {
+    number: number | null;
+    text: string;
+};
+
+export type RecipeDetailNutrition = {
+    calories: number | null;
+    protein: number | null;
+    carbs: number | null;
+    fat: number | null;
+    saturatedFat: number | null;
+    fiber: number | null;
+    sugars: number | null;
+    sodium: number | null;
+};
+
+export type RecipeDetail = {
+    id: string;
+    name: string;
+    description: string | null;
+    image: string | null;
+    servings: number | null; // how many servings the ingredient amounts make
+    prepMinutes: number | null;
+    cookMinutes: number | null;
+    types: string[];
+    ingredients: RecipeDetailIngredient[];
+    steps: RecipeDetailStep[];
+    nutrition: RecipeDetailNutrition; // PER serving
+};
+
+// Fetch one recipe's full detail. Recipe ids come from searchRecipes (the
+// Recipes tab); they are a SEPARATE id space from food ids.
+export async function getRecipeById(id: string): Promise<RecipeDetail> {
+    if (!/^[0-9]+$/.test(id)) {
+        throw new Error('Invalid recipe ID.');
+    }
+
+    const recipe = await proxyGet<RecipeDetail>('/recipe', { id });
+
+    if (String(recipe.id) !== id || typeof recipe.name !== 'string') {
+        throw new Error('Unexpected recipe details returned.');
+    }
+
+    return recipe;
 }

@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -86,7 +87,9 @@ export default function PlanScreen() {
               key={i}
               meal={meal}
               onPress={() => {
-                // TODO: open Meal Details (owned by another task)
+                // Food Details runs on a mock recipe for now; once meals carry
+                // full detail, pass an id/params here to load the real one.
+                router.push('/food-details');
               }}
             />
           ))}
