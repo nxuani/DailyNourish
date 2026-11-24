@@ -1,107 +1,269 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { router, Stack } from 'expo-router';
-import { useState } from 'react';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
 import {
+    ActivityIndicator,
     Pressable,
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import PantryUnitPicker from '@/components/pantry-unit-picker';
+import {
+    getFoodById,
+    getRecipeById,
+    searchFoods,
+    type FoodSearchItem,
+    type RecipeDetail,
+} from '@/lib/fatsecret';
+import { matchFoodIcon } from '@/lib/foodIcon';
+import {
+    convertPantryQuantity,
+    pantryServingMultiplier,
+    pantryUnitOptions,
+} from '@/lib/pantry-nutrition';
 import {
     addFoodToMeal,
     makeId,
     toDateKey,
+    type MealType,
 } from '@/services/meal-log-store';
 import { colors, fontSize, fontWeight } from '@/theme/tokens';
-import { RecipeDetail } from '@/types/recipe';
 
-// Mock recipe until a real source exists (the FatSecret proxy has no
-// recipe.get route, and the Plan's AI meals don't carry this much detail).
-// Swap this for a fetch keyed on the route's `id` param when one lands.
-const MOCK_RECIPE: RecipeDetail = {
-    id: 'chicken-rice-spinach-bowl',
-    name: 'Chicken, Rice & Spinach Bowl',
-    mealType: 'dinner',
-    tags: ['Low sodium', 'Pantry-friendly'],
-    image: null,
-    emoji: '🥗',
-    servingLabel: 'bowl',
-    prepMinutes: 5,
-    cookMinutes: 20,
-    ingredients: [
-        { name: 'Chicken breast', qty: 5, unit: 'oz' },
-        { name: 'Brown rice, cooked', qty: 1, unit: 'cup' },
-        { name: 'Fresh spinach', qty: 2, unit: 'cups' },
-        { name: 'Olive oil & seasoning', qty: 1, unit: 'tbsp' },
-    ],
-    note: 'Use 1 tbsp olive oil in total, plus salt-free seasoning to taste. Rice quantity is measured cooked.',
-    steps: [
-        {
-            title: 'Prep the ingredients',
-            body: 'Pat the chicken dry. Rinse the spinach and measure the cooked rice. Season with pepper and salt-free herbs.',
-        },
-        {
-            title: 'Cook the chicken',
-            body: 'Heat half the olive oil in a skillet over medium heat. Cook the chicken for 6–8 minutes per side, until the center reaches 165°F. Rest, then slice.',
-        },
-        {
-            title: 'Warm rice & wilt spinach',
-            body: 'Warm the cooked rice until steaming. In the skillet, sauté spinach with the remaining olive oil for 1–2 minutes, until just wilted.',
-        },
-        {
-            title: 'Build your bowl',
-            body: 'Add the rice and spinach to a bowl, top with sliced chicken and finish with your preferred salt-free seasoning.',
-        },
-    ],
-    nutrition: {
-        calories: 520,
-        protein: 42,
-        carbs: 48,
-        fat: 18,
-        saturatedFat: 3,
-        fiber: 5,
-        sugars: 2,
-        sodium: 120,
-    },
+type Nutrition = {
+    calories: number | null;
+    protein: number | null;
+    carbs: number | null;
+    fat: number | null;
+    saturatedFat: number | null;
+    fiber: number | null;
+    sugars: number | null;
+    sodium: number | null;
 };
 
-// Trim trailing zeros from a scaled amount (e.g. 1.5 -> "1.5", 2 -> "2").
+// Round for display; show a dash when a value is missing.
+const round = (n: number | null | undefined) =>
+    n == null ? '—' : String(Math.round(n));
+// Trim trailing zeros from a scaled amount (1.5 -> "1.5", 2 -> "2").
 const fmtQty = (n: number) => Number(n.toFixed(2)).toString();
-const round = (n: number) => Math.round(n);
+
+// No meal picker in this pass — slot the food by time of day.
+function currentMealType(): MealType {
+    const h = new Date().getHours();
+    if (h < 11) return 'breakfast';
+    if (h < 16) return 'lunch';
+    if (h < 21) return 'dinner';
+    return 'snack';
+}
+
+const iconFor = (name: string) => matchFoodIcon(name) ?? '🍽️';
+
+// Scale a food's per-serving nutrition by a serving multiplier (null-safe).
+function scaleNutrition(food: FoodSearchItem, mult: number): Nutrition {
+    const s = (v: number | null | undefined) =>
+        typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v * mult : null;
+    return {
+        calories: s(food.calories),
+        protein: s(food.protein),
+        carbs: s(food.carbs),
+        fat: s(food.fat),
+        saturatedFat: s(food.saturatedFat),
+        fiber: s(food.fiber),
+        sugars: s(food.sugars),
+        sodium: s(food.sodium),
+    };
+}
 
 export default function FoodDetailsScreen() {
-    const recipe = MOCK_RECIPE;
-    const [servings, setServings] = useState(1);
-    const [saved, setSaved] = useState(false);
+    // type=recipe → full breakdown; type=food → nutrition only.
+    // A food opens by id (from a search result) or by name (a curated
+    // ingredient, which has no FatSecret id until we look it up).
+    const params = useLocalSearchParams<{
+        type?: string;
+        id?: string;
+        name?: string;
+    }>();
+    const type = params.type === 'recipe' ? 'recipe' : 'food';
+    const id = params.id;
+    const name = params.name;
 
-    const totalMinutes = recipe.prepMinutes + recipe.cookMinutes;
-    const nut = recipe.nutrition; // the facts card stays per-serving
-    const servingsWord = servings === 1 ? 'serving' : 'servings';
+    const [recipe, setRecipe] = useState<RecipeDetail | null>(null);
+    const [food, setFood] = useState<FoodSearchItem | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [reloadKey, setReloadKey] = useState(0);
+
+    const [saved, setSaved] = useState(false);
+    // Which recipe ingredients the user has ticked off ("I have this").
+    const [checked, setChecked] = useState<Set<number>>(() => new Set());
+
+    // Food: an amount + unit the user can change; nutrition recalculates live.
+    const [amount, setAmount] = useState('1');
+    const [unit, setUnit] = useState('servings');
+
+    const unitOptions = useMemo(() => pantryUnitOptions(food), [food]);
+
+    useEffect(() => {
+        let cancelled = false;
+        async function load() {
+            setLoading(true);
+            setError(null);
+            setRecipe(null);
+            setFood(null);
+            try {
+                if (type === 'recipe' && id) {
+                    const r = await getRecipeById(id);
+                    if (!cancelled) setRecipe(r);
+                } else if (type === 'food' && id) {
+                    const f = await getFoodById(id);
+                    if (!cancelled) {
+                        setFood(f);
+                        // Start at "1 <natural unit>" for the just-loaded food.
+                        setUnit(pantryUnitOptions(f)[0]?.value ?? 'servings');
+                        setAmount('1');
+                    }
+                } else if (type === 'food' && name) {
+                    // Curated ingredient: resolve the name to a generic food.
+                    const res = await searchFoods(name, {
+                        foodType: 'generic',
+                        maxResults: 1,
+                    });
+                    if (!cancelled) {
+                        const f = res.results[0];
+                        if (f) {
+                            setFood(f);
+                            setUnit(
+                                pantryUnitOptions(f)[0]?.value ?? 'servings'
+                            );
+                            setAmount('1');
+                        } else
+                            setError(
+                                'No nutrition info found for this ingredient.'
+                            );
+                    }
+                } else if (!cancelled) {
+                    setError('Nothing to show.');
+                }
+            } catch (e) {
+                if (!cancelled)
+                    setError(
+                        e instanceof Error ? e.message : 'Something went wrong'
+                    );
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        }
+        load();
+        return () => {
+            cancelled = true;
+        };
+    }, [type, id, name, reloadKey]);
+
+    const isRecipe = !!recipe;
+    const title = recipe?.name ?? food?.name ?? '';
+
+    // --- Food: live multiplier + scaled nutrition from the chosen amount/unit.
+    const amountNum = parseFloat(amount);
+    const foodMultiplier =
+        food && Number.isFinite(amountNum)
+            ? pantryServingMultiplier(food, amountNum, unit)
+            : null;
+    const unitLabel =
+        unitOptions.find((o) => o.value === unit)?.label ?? unit;
+
+    // Per-serving nutrition for the facts card.
+    const nutrition: Nutrition | null = recipe
+        ? recipe.nutrition
+        : food
+          ? scaleNutrition(food, foodMultiplier ?? 0)
+          : null;
+
+    // Switch units but keep the same physical amount (1 serving -> 100 g).
+    const onUnitChange = (next: string) => {
+        if (food && Number.isFinite(amountNum)) {
+            const converted = convertPantryQuantity(
+                food,
+                amountNum,
+                unit,
+                next
+            );
+            if (converted != null) setAmount(fmtQty(converted));
+        }
+        setUnit(next);
+    };
+
+    const image = recipe?.image ?? food?.image ?? null;
+    const kicker = recipe
+        ? (recipe.types[0] ?? 'Recipe').toUpperCase()
+        : (
+              food?.brand ?? (food?.type === 'brand' ? 'Food' : 'Ingredient')
+          ).toUpperCase();
+    const heroSubtitle =
+        recipe?.description ?? (food?.serving ? `Per ${food.serving}` : null);
+
+    const totalMinutes =
+        recipe && (recipe.prepMinutes != null || recipe.cookMinutes != null)
+            ? (recipe.prepMinutes ?? 0) + (recipe.cookMinutes ?? 0)
+            : null;
+    const showTimes =
+        !!recipe && (recipe.prepMinutes != null || recipe.cookMinutes != null);
+
+    const factsLabel = recipe
+        ? 'Per 1 serving'
+        : `Per ${amount || '0'} ${unitLabel}`;
 
     const addToMealLog = () => {
-        // Nutrition is stored per serving; the store scales by `servings`.
-        addFoodToMeal(toDateKey(new Date()), recipe.mealType, {
-            id: makeId(),
-            name: recipe.name,
-            amount: `1 ${recipe.servingLabel}`,
-            servings,
-            calories: nut.calories,
-            protein: nut.protein,
-            carbs: nut.carbs,
-            fat: nut.fat,
-        });
+        if (!nutrition) return;
+        if (isRecipe) {
+            addFoodToMeal(toDateKey(new Date()), currentMealType(), {
+                id: makeId(),
+                name: title,
+                amount: '1 serving',
+                servings: 1,
+                calories: recipe!.nutrition.calories ?? 0,
+                protein: recipe!.nutrition.protein ?? 0,
+                carbs: recipe!.nutrition.carbs ?? 0,
+                fat: recipe!.nutrition.fat ?? 0,
+            });
+        } else if (food && foodMultiplier && foodMultiplier > 0) {
+            // Store scales per-serving nutrition by `servings`; the multiplier
+            // is how many base servings the chosen amount equals.
+            addFoodToMeal(toDateKey(new Date()), currentMealType(), {
+                id: makeId(),
+                name: title,
+                amount: `${amount} ${unitLabel}`,
+                servings: foodMultiplier,
+                calories: food.calories ?? 0,
+                protein: food.protein ?? 0,
+                carbs: food.carbs ?? 0,
+                fat: food.fat ?? 0,
+            });
+        } else {
+            return;
+        }
         router.push('/(tabs)/meal-log');
     };
+
+    const canAdd = isRecipe || !!(foodMultiplier && foodMultiplier > 0);
+
+    const toggleChecked = (i: number) =>
+        setChecked((prev) => {
+            const next = new Set(prev);
+            if (next.has(i)) next.delete(i);
+            else next.add(i);
+            return next;
+        });
 
     return (
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
             <Stack.Screen options={{ headerShown: false }} />
 
-            {/* Custom header */}
+            {/* Header */}
             <View style={styles.header}>
                 <Pressable
                     hitSlop={10}
@@ -109,201 +271,342 @@ export default function FoodDetailsScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="Go back"
                 >
-                    <Ionicons
-                        name="chevron-back"
-                        size={24}
-                        color={colors.heading}
-                    />
+                    <Ionicons name="chevron-back" size={24} color={colors.heading} />
                 </Pressable>
                 <Text style={styles.headerTitle}>Food Details</Text>
-                <Pressable
-                    hitSlop={10}
-                    onPress={() => setSaved((s) => !s)}
-                    accessibilityRole="button"
-                    accessibilityLabel={saved ? 'Remove saved recipe' : 'Save recipe'}
-                >
-                    <Ionicons
-                        name={saved ? 'bookmark' : 'bookmark-outline'}
-                        size={22}
-                        color={colors.primary}
-                    />
-                </Pressable>
+                {isRecipe ? (
+                    <Pressable
+                        hitSlop={10}
+                        onPress={() => setSaved((s) => !s)}
+                        accessibilityRole="button"
+                        accessibilityLabel={saved ? 'Remove saved recipe' : 'Save recipe'}
+                    >
+                        <Ionicons
+                            name={saved ? 'bookmark' : 'bookmark-outline'}
+                            size={22}
+                            color={colors.primary}
+                        />
+                    </Pressable>
+                ) : (
+                    <View style={styles.headerSpacer} />
+                )}
             </View>
 
-            <ScrollView
-                contentContainerStyle={styles.content}
-                showsVerticalScrollIndicator={false}
-            >
-                {/* Hero */}
-                <View style={styles.hero}>
-                    <View style={styles.heroImage}>
-                        {recipe.image ? (
-                            <Image
-                                source={{ uri: recipe.image }}
-                                style={styles.heroImageFill}
-                                contentFit="cover"
-                                transition={150}
-                            />
-                        ) : (
-                            <Text style={styles.heroEmoji}>{recipe.emoji}</Text>
+            {loading ? (
+                <View style={styles.centerBox}>
+                    <ActivityIndicator color={colors.primary} />
+                </View>
+            ) : error ? (
+                <View style={styles.centerBox}>
+                    <Text style={styles.errorText}>{error}</Text>
+                    <Pressable
+                        onPress={() => setReloadKey((k) => k + 1)}
+                        style={styles.retryButton}
+                    >
+                        <Text style={styles.retryText}>Try again</Text>
+                    </Pressable>
+                </View>
+            ) : !nutrition ? (
+                <View style={styles.centerBox}>
+                    <Text style={styles.emptyText}>Nothing to show.</Text>
+                </View>
+            ) : (
+                <>
+                    <ScrollView
+                        contentContainerStyle={styles.content}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
+                    >
+                        {/* Hero */}
+                        <View style={styles.hero}>
+                            <View style={styles.heroImage}>
+                                {image ? (
+                                    <Image
+                                        source={{ uri: image }}
+                                        style={styles.heroImageFill}
+                                        contentFit="cover"
+                                        transition={150}
+                                    />
+                                ) : (
+                                    <Text style={styles.heroEmoji}>
+                                        {iconFor(title)}
+                                    </Text>
+                                )}
+                            </View>
+                            <View style={styles.heroText}>
+                                <Text style={styles.heroKicker}>{kicker}</Text>
+                                <Text style={styles.heroTitle}>{title}</Text>
+                                <Text style={styles.heroMeta}>
+                                    {round(nutrition.calories)} cal •{' '}
+                                    {round(nutrition.protein)} g protein
+                                </Text>
+                                {heroSubtitle ? (
+                                    <Text
+                                        style={styles.heroSubtitle}
+                                        numberOfLines={2}
+                                    >
+                                        {heroSubtitle}
+                                    </Text>
+                                ) : null}
+                            </View>
+                        </View>
+
+                        {/* Prep / Cook / Total (recipe only) */}
+                        {showTimes && (
+                            <View style={styles.timeRow}>
+                                <TimeCell
+                                    label="Prep"
+                                    value={
+                                        recipe!.prepMinutes != null
+                                            ? `${recipe!.prepMinutes} min`
+                                            : '—'
+                                    }
+                                />
+                                <View style={styles.timeDivider} />
+                                <TimeCell
+                                    label="Cook"
+                                    value={
+                                        recipe!.cookMinutes != null
+                                            ? `${recipe!.cookMinutes} min`
+                                            : '—'
+                                    }
+                                />
+                                <View style={styles.timeDivider} />
+                                <TimeCell
+                                    label="Total"
+                                    value={
+                                        totalMinutes != null
+                                            ? `${totalMinutes} min`
+                                            : '—'
+                                    }
+                                />
+                            </View>
                         )}
-                    </View>
-                    <View style={styles.heroText}>
-                        <Text style={styles.heroKicker}>
-                            {recipe.mealType.toUpperCase()}
-                        </Text>
-                        <Text style={styles.heroTitle}>{recipe.name}</Text>
-                        <Text style={styles.heroMeta}>
-                            {round(nut.calories)} cal • {round(nut.protein)} g
-                            protein
-                        </Text>
-                        {recipe.tags.length > 0 && (
-                            <Text style={styles.heroTags}>
-                                {recipe.tags.join(' • ')}
-                            </Text>
+
+                        {/* Food: amount + unit (nutrition recalculates live) */}
+                        {!isRecipe && (
+                            <View style={styles.amountBlock}>
+                                <Text style={styles.sectionTitle}>Amount</Text>
+                                <View style={styles.amountRow}>
+                                    <TextInput
+                                        style={styles.amountInput}
+                                        value={amount}
+                                        onChangeText={setAmount}
+                                        keyboardType="decimal-pad"
+                                        placeholder="1"
+                                        placeholderTextColor={colors.textMuted}
+                                        accessibilityLabel="Amount"
+                                    />
+                                    <View style={styles.amountUnit}>
+                                        <PantryUnitPicker
+                                            value={unit}
+                                            onChange={onUnitChange}
+                                            options={unitOptions.map((o) => ({
+                                                value: o.value,
+                                                label: o.label,
+                                            }))}
+                                        />
+                                    </View>
+                                </View>
+                            </View>
                         )}
-                    </View>
-                </View>
 
-                {/* Prep / Cook / Total */}
-                <View style={styles.timeRow}>
-                    <TimeCell label="Prep" value={`${recipe.prepMinutes} min`} />
-                    <View style={styles.timeDivider} />
-                    <TimeCell label="Cook" value={`${recipe.cookMinutes} min`} />
-                    <View style={styles.timeDivider} />
-                    <TimeCell label="Total" value={`${totalMinutes} min`} />
-                </View>
+                        {/* Recipe: Ingredients (real measurement text) */}
+                        {isRecipe && recipe!.ingredients.length > 0 && (
+                            <>
+                                <View style={styles.sectionRow}>
+                                    <Text style={styles.sectionTitle}>
+                                        Ingredients
+                                    </Text>
+                                    {recipe!.servings ? (
+                                        <Text style={styles.makesCaption}>
+                                            Makes {recipe!.servings}{' '}
+                                            {recipe!.servings === 1
+                                                ? 'serving'
+                                                : 'servings'}
+                                        </Text>
+                                    ) : null}
+                                </View>
 
-                {/* Ingredients */}
-                <View style={styles.sectionRow}>
-                    <Text style={styles.sectionTitle}>Ingredients</Text>
-                    <View style={styles.stepper}>
-                        <Pressable
-                            hitSlop={8}
-                            onPress={() =>
-                                setServings((s) => Math.max(1, s - 1))
-                            }
-                            accessibilityRole="button"
-                            accessibilityLabel="Fewer servings"
-                            disabled={servings <= 1}
-                        >
-                            <Ionicons
-                                name="remove"
-                                size={18}
-                                color={
-                                    servings <= 1
-                                        ? colors.textMuted
-                                        : colors.primary
-                                }
-                            />
-                        </Pressable>
-                        <Text style={styles.stepperText}>
-                            {servings} {servingsWord}
+                                <View style={styles.list}>
+                                    {recipe!.ingredients.map((ing, i) => {
+                                        // Prefer FatSecret's human text ("3 1/4
+                                        // cups crushed tomatoes"); its number +
+                                        // unit fields are often junk like
+                                        // "3.25 serving".
+                                        const line =
+                                            ing.description?.trim() ||
+                                            [
+                                                ing.quantity != null
+                                                    ? fmtQty(ing.quantity)
+                                                    : null,
+                                                ing.unit,
+                                                ing.name,
+                                            ]
+                                                .filter(Boolean)
+                                                .join(' ') ||
+                                            ing.name ||
+                                            '';
+                                        const isChecked = checked.has(i);
+                                        return (
+                                            <View
+                                                key={`${ing.foodId ?? ing.name ?? i}-${i}`}
+                                                style={styles.ingredientRow}
+                                            >
+                                                <Pressable
+                                                    onPress={() =>
+                                                        toggleChecked(i)
+                                                    }
+                                                    hitSlop={8}
+                                                    accessibilityRole="checkbox"
+                                                    accessibilityState={{
+                                                        checked: isChecked,
+                                                    }}
+                                                    accessibilityLabel={line}
+                                                    style={[
+                                                        styles.checkCircle,
+                                                        isChecked &&
+                                                            styles.checkCircleOn,
+                                                    ]}
+                                                >
+                                                    {isChecked && (
+                                                        <Ionicons
+                                                            name="checkmark"
+                                                            size={14}
+                                                            color={
+                                                                colors.onPrimary
+                                                            }
+                                                        />
+                                                    )}
+                                                </Pressable>
+                                                <Text
+                                                    style={[
+                                                        styles.ingredientText,
+                                                        isChecked &&
+                                                            styles.ingredientTextChecked,
+                                                    ]}
+                                                >
+                                                    {line}
+                                                </Text>
+                                            </View>
+                                        );
+                                    })}
+                                </View>
+                            </>
+                        )}
+
+                        {/* How to prepare (recipe only) */}
+                        {isRecipe && recipe!.steps.length > 0 && (
+                            <>
+                                <Text
+                                    style={[styles.sectionTitle, styles.blockTitle]}
+                                >
+                                    How to prepare
+                                </Text>
+                                {recipe!.steps.map((step, i) => (
+                                    <View key={i} style={styles.step}>
+                                        <View style={styles.stepNum}>
+                                            <Text style={styles.stepNumText}>
+                                                {step.number ?? i + 1}
+                                            </Text>
+                                        </View>
+                                        <Text style={styles.stepText}>
+                                            {step.text}
+                                        </Text>
+                                    </View>
+                                ))}
+                            </>
+                        )}
+
+                        {/* Nutritional facts (both variants) */}
+                        <Text style={[styles.sectionTitle, styles.blockTitle]}>
+                            Nutritional facts
                         </Text>
-                        <Pressable
-                            hitSlop={8}
-                            onPress={() => setServings((s) => s + 1)}
-                            accessibilityRole="button"
-                            accessibilityLabel="More servings"
-                        >
-                            <Ionicons
-                                name="add"
-                                size={18}
-                                color={colors.primary}
+                        <View style={styles.nutCard}>
+                            <View style={styles.nutHeader}>
+                                <View style={styles.nutHeaderLeft}>
+                                    <Text style={styles.nutPer}>
+                                        {factsLabel}
+                                    </Text>
+                                    <Text style={styles.nutCaloriesLabel}>
+                                        Calories
+                                    </Text>
+                                </View>
+                                <Text style={styles.nutCaloriesValue}>
+                                    {round(nutrition.calories)}
+                                </Text>
+                            </View>
+
+                            <View style={styles.macroStrip}>
+                                <MacroCol
+                                    value={`${round(nutrition.protein)} g`}
+                                    label="Protein"
+                                />
+                                <MacroCol
+                                    value={`${round(nutrition.carbs)} g`}
+                                    label="Carbs"
+                                />
+                                <MacroCol
+                                    value={`${round(nutrition.fat)} g`}
+                                    label="Fat"
+                                />
+                            </View>
+
+                            <NutRow
+                                label="Saturated fat"
+                                value={`${round(nutrition.saturatedFat)} g`}
                             />
+                            <NutRow
+                                label="Fiber"
+                                value={`${round(nutrition.fiber)} g`}
+                            />
+                            <NutRow
+                                label="Total sugars"
+                                value={`${round(nutrition.sugars)} g`}
+                            />
+                            <NutRow
+                                label="Sodium"
+                                value={`${round(nutrition.sodium)} mg`}
+                                last
+                            />
+
+                            <Text style={styles.nutNote}>
+                                Estimated values; may vary with ingredients and
+                                preparation.
+                            </Text>
+                        </View>
+                    </ScrollView>
+
+                    {/* Pinned actions */}
+                    <View style={styles.footer}>
+                        {isRecipe && (
+                            <Pressable
+                                style={[styles.btn, styles.btnOutline]}
+                                onPress={() => setSaved((s) => !s)}
+                                accessibilityRole="button"
+                            >
+                                <Text style={styles.btnOutlineText}>
+                                    {saved ? 'Saved ✓' : 'Save recipe'}
+                                </Text>
+                            </Pressable>
+                        )}
+                        <Pressable
+                            style={[
+                                styles.btn,
+                                styles.btnFilled,
+                                !canAdd && styles.btnDisabled,
+                            ]}
+                            onPress={addToMealLog}
+                            disabled={!canAdd}
+                            accessibilityRole="button"
+                        >
+                            <Text style={styles.btnFilledText}>
+                                Add to Meal Log
+                            </Text>
                         </Pressable>
                     </View>
-                </View>
-
-                <View style={styles.list}>
-                    {recipe.ingredients.map((ing) => (
-                        <View key={ing.name} style={styles.ingredientRow}>
-                            <View style={styles.checkCircle} />
-                            <Text style={styles.ingredientName} numberOfLines={1}>
-                                {ing.name}
-                            </Text>
-                            <Text style={styles.ingredientAmount}>
-                                {fmtQty(ing.qty * servings)} {ing.unit}
-                            </Text>
-                        </View>
-                    ))}
-                </View>
-
-                {recipe.note && <Text style={styles.note}>{recipe.note}</Text>}
-
-                {/* How to prepare */}
-                <Text style={[styles.sectionTitle, styles.blockTitle]}>
-                    How to prepare
-                </Text>
-                {recipe.steps.map((step, i) => (
-                    <View key={step.title} style={styles.step}>
-                        <View style={styles.stepNum}>
-                            <Text style={styles.stepNumText}>{i + 1}</Text>
-                        </View>
-                        <View style={styles.stepBody}>
-                            <Text style={styles.stepTitle}>{step.title}</Text>
-                            <Text style={styles.stepText}>{step.body}</Text>
-                        </View>
-                    </View>
-                ))}
-
-                {/* Nutritional facts (per serving) */}
-                <Text style={[styles.sectionTitle, styles.blockTitle]}>
-                    Nutritional facts
-                </Text>
-                <View style={styles.nutCard}>
-                    <View style={styles.nutHeader}>
-                        <View style={styles.nutHeaderLeft}>
-                            <Text style={styles.nutPer}>
-                                Per 1 serving • 1 {recipe.servingLabel}
-                            </Text>
-                            <Text style={styles.nutCaloriesLabel}>Calories</Text>
-                        </View>
-                        <Text style={styles.nutCaloriesValue}>
-                            {round(nut.calories)}
-                        </Text>
-                    </View>
-
-                    <View style={styles.macroStrip}>
-                        <MacroCol value={`${round(nut.protein)} g`} label="Protein" />
-                        <MacroCol value={`${round(nut.carbs)} g`} label="Carbs" />
-                        <MacroCol value={`${round(nut.fat)} g`} label="Fat" />
-                    </View>
-
-                    <NutRow
-                        label="Saturated fat"
-                        value={`${round(nut.saturatedFat)} g`}
-                    />
-                    <NutRow label="Fiber" value={`${round(nut.fiber)} g`} />
-                    <NutRow label="Total sugars" value={`${round(nut.sugars)} g`} />
-                    <NutRow label="Sodium" value={`${round(nut.sodium)} mg`} last />
-
-                    <Text style={styles.nutNote}>
-                        Estimated values; may vary with ingredients and
-                        preparation.
-                    </Text>
-                </View>
-            </ScrollView>
-
-            {/* Pinned actions */}
-            <View style={styles.footer}>
-                <Pressable
-                    style={[styles.btn, styles.btnOutline]}
-                    onPress={() => setSaved((s) => !s)}
-                    accessibilityRole="button"
-                >
-                    <Text style={styles.btnOutlineText}>
-                        {saved ? 'Saved ✓' : 'Save recipe'}
-                    </Text>
-                </Pressable>
-                <Pressable
-                    style={[styles.btn, styles.btnFilled]}
-                    onPress={addToMealLog}
-                    accessibilityRole="button"
-                >
-                    <Text style={styles.btnFilledText}>Add to Meal Log</Text>
-                </Pressable>
-            </View>
+                </>
+            )}
         </SafeAreaView>
     );
 }
@@ -346,7 +649,6 @@ function NutRow({
 const styles = StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.background },
 
-    // Header
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -359,8 +661,41 @@ const styles = StyleSheet.create({
         fontWeight: fontWeight.bold,
         color: colors.heading,
     },
+    headerSpacer: { width: 22 },
 
     content: { paddingHorizontal: 20, paddingBottom: 24 },
+
+    // Loading / error / empty
+    centerBox: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 32,
+        gap: 12,
+    },
+    errorText: {
+        fontSize: fontSize.base,
+        color: colors.warning,
+        textAlign: 'center',
+    },
+    emptyText: {
+        fontSize: fontSize.base,
+        color: colors.textMuted,
+        textAlign: 'center',
+    },
+    retryButton: {
+        paddingHorizontal: 16,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: colors.primary,
+        justifyContent: 'center',
+    },
+    retryText: {
+        fontSize: fontSize.base,
+        fontWeight: fontWeight.semibold,
+        color: colors.primary,
+    },
 
     // Hero
     hero: {
@@ -396,7 +731,11 @@ const styles = StyleSheet.create({
         color: colors.heading,
     },
     heroMeta: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 4 },
-    heroTags: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
+    heroSubtitle: {
+        fontSize: fontSize.sm,
+        color: colors.textMuted,
+        marginTop: 3,
+    },
 
     // Time row
     timeRow: {
@@ -409,11 +748,7 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
     },
     timeCell: { flex: 1, alignItems: 'center' },
-    timeDivider: {
-        width: 1,
-        height: 28,
-        backgroundColor: colors.borderSoft,
-    },
+    timeDivider: { width: 1, height: 28, backgroundColor: colors.borderSoft },
     timeLabel: { fontSize: fontSize.sm, color: colors.textMuted },
     timeValue: {
         fontSize: fontSize.md,
@@ -421,6 +756,28 @@ const styles = StyleSheet.create({
         color: colors.heading,
         marginTop: 3,
     },
+
+    // Amount control (food variant)
+    amountBlock: { marginTop: 22 },
+    amountRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12,
+        marginTop: 12,
+    },
+    amountInput: {
+        width: 88,
+        height: 50,
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: 12,
+        backgroundColor: colors.surface,
+        paddingHorizontal: 14,
+        fontSize: fontSize.md,
+        color: colors.heading,
+        fontWeight: fontWeight.semibold,
+    },
+    amountUnit: { flex: 1 },
 
     // Section header + stepper
     sectionRow: {
@@ -436,30 +793,17 @@ const styles = StyleSheet.create({
         color: colors.heading,
     },
     blockTitle: { marginTop: 24, marginBottom: 12 },
-    stepper: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        backgroundColor: colors.surface,
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: 20,
-        paddingHorizontal: 14,
-        height: 36,
-    },
-    stepperText: {
-        fontSize: fontSize.base,
+    makesCaption: {
+        fontSize: fontSize.sm,
+        color: colors.textMuted,
         fontWeight: fontWeight.semibold,
-        color: colors.heading,
-        minWidth: 64,
-        textAlign: 'center',
     },
 
     // Ingredients
     list: { gap: 10 },
     ingredientRow: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         backgroundColor: colors.surface,
         borderWidth: 1,
         borderColor: colors.border,
@@ -469,24 +813,30 @@ const styles = StyleSheet.create({
         gap: 12,
     },
     checkCircle: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
         borderWidth: 1.5,
         borderColor: colors.controlOutline,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 1,
     },
-    ingredientName: {
+    checkCircleOn: {
+        backgroundColor: colors.primary,
+        borderColor: colors.primary,
+    },
+    ingredientText: {
         flex: 1,
+        flexShrink: 1,
         fontSize: fontSize.md,
         fontWeight: fontWeight.semibold,
         color: colors.heading,
+        lineHeight: 20,
     },
-    ingredientAmount: { fontSize: fontSize.base, color: colors.textMuted },
-    note: {
-        fontSize: fontSize.sm,
+    ingredientTextChecked: {
         color: colors.textMuted,
-        marginTop: 12,
-        lineHeight: 18,
+        textDecorationLine: 'line-through',
     },
 
     // Steps
@@ -504,14 +854,8 @@ const styles = StyleSheet.create({
         fontWeight: fontWeight.bold,
         color: colors.onPrimary,
     },
-    stepBody: { flex: 1 },
-    stepTitle: {
-        fontSize: fontSize.md,
-        fontWeight: fontWeight.bold,
-        color: colors.heading,
-        marginBottom: 3,
-    },
     stepText: {
+        flex: 1,
         fontSize: fontSize.base,
         color: colors.text,
         lineHeight: 20,
@@ -603,6 +947,7 @@ const styles = StyleSheet.create({
         color: colors.primary,
     },
     btnFilled: { backgroundColor: colors.primary },
+    btnDisabled: { opacity: 0.5 },
     btnFilledText: {
         fontSize: fontSize.md,
         fontWeight: fontWeight.bold,
